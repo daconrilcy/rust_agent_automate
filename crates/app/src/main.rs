@@ -1,6 +1,7 @@
 mod artifact;
 mod codex;
 mod fix_loop;
+mod implementation_audit;
 mod plan;
 mod review;
 
@@ -13,6 +14,7 @@ use std::time::Duration;
 
 use codex::{CodexMode, CodexRequest, ReasoningEffort};
 use fix_loop::FixLoopCommand;
+use implementation_audit::ImplementationAuditCommand;
 use plan::PlanCommand;
 use review::{ReviewCommand, ReviewSubject};
 
@@ -23,6 +25,7 @@ fn main() {
         Ok(CliCommand::Run(request)) => run_request(&request),
         Ok(CliCommand::Audit(request)) => run_audit(&request),
         Ok(CliCommand::Plan(request)) => run_plan(&request),
+        Ok(CliCommand::ImplementationAudit(request)) => run_implementation_audit(&request),
         Ok(CliCommand::Review(request)) => run_review(&request),
         Ok(CliCommand::FixLoop(request)) => run_fix_loop(&request),
         Err(ParseOutcome::Help) => print_help(),
@@ -40,6 +43,7 @@ enum CliCommand {
     Run(CodexRequest),
     Audit(AuditCommand),
     Plan(PlanCommand),
+    ImplementationAudit(ImplementationAuditCommand),
     Review(ReviewCommand),
     FixLoop(FixLoopCommand),
 }
@@ -66,6 +70,13 @@ fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
 
     if matches!(args.first().map(String::as_str), Some("plan")) {
         return parse_plan_args(&args[1..]).map(CliCommand::Plan);
+    }
+
+    if matches!(
+        args.first().map(String::as_str),
+        Some("implementation-audit" | "impl-audit")
+    ) {
+        return parse_implementation_audit_args(&args[1..]).map(CliCommand::ImplementationAudit);
     }
 
     if matches!(args.first().map(String::as_str), Some("review")) {
@@ -300,6 +311,120 @@ fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         ),
         workspace_root,
         audit_path,
+        output_dir,
+        timeout,
+    })
+}
+
+fn parse_implementation_audit_args(
+    args: &[String],
+) -> Result<ImplementationAuditCommand, ParseOutcome> {
+    let mut model = String::from("gpt-5.4");
+    let mut reasoning_effort = ReasoningEffort::High;
+    let mut verbose = false;
+    let mut plan_path: Option<PathBuf> = None;
+    let mut implementation_path: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
+    let mut timeout = Duration::from_secs(900);
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseOutcome::Help),
+            "--model" => {
+                let value = next_value(args, index, "--model")?;
+                model = value.to_owned();
+                index += 2;
+            }
+            "--reasoning" => {
+                let value = next_value(args, index, "--reasoning")?;
+                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
+                index += 2;
+            }
+            "--plan" => {
+                let value = next_value(args, index, "--plan")?;
+                if plan_path.is_some() {
+                    return Err(ParseOutcome::Error(
+                        "le plan d'implementation a deja ete fourni".to_string(),
+                    ));
+                }
+                plan_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--implementation" => {
+                let value = next_value(args, index, "--implementation")?;
+                if implementation_path.is_some() {
+                    return Err(ParseOutcome::Error(
+                        "le chemin d'implementation a deja ete fourni".to_string(),
+                    ));
+                }
+                implementation_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--output-dir" => {
+                let value = next_value(args, index, "--output-dir")?;
+                output_dir = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--timeout-seconds" => {
+                let value = next_value(args, index, "--timeout-seconds")?;
+                timeout = parse_timeout(value)?;
+                index += 2;
+            }
+            "--verbose" => {
+                verbose = true;
+                index += 1;
+            }
+            value if value.starts_with("--") => {
+                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
+            }
+            value => {
+                if plan_path.is_some() {
+                    return Err(ParseOutcome::Error(format!(
+                        "argument inattendu pour implementation-audit: {value}"
+                    )));
+                }
+
+                plan_path = Some(PathBuf::from(value));
+                index += 1;
+            }
+        }
+    }
+
+    let plan_path = plan_path.ok_or_else(|| {
+        ParseOutcome::Error(
+            "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
+                .to_string(),
+        )
+    })?;
+    let workspace_root = env::current_dir().map_err(|error| {
+        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
+    })?;
+    let plan_path =
+        implementation_audit::resolve_plan_file(plan_path).map_err(ParseOutcome::Error)?;
+    let implementation_path = implementation_path
+        .map(implementation_audit::resolve_implementation_path)
+        .transpose()
+        .map_err(ParseOutcome::Error)?;
+    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".audit"));
+    let prompt = implementation_audit::build_prompt(
+        &workspace_root,
+        &plan_path,
+        implementation_path.as_deref(),
+        &output_dir,
+    );
+
+    Ok(ImplementationAuditCommand {
+        request: CodexRequest::new(
+            model,
+            reasoning_effort,
+            CodexMode::Exec,
+            Some(prompt),
+            verbose,
+        ),
+        workspace_root,
+        plan_path,
+        implementation_path,
         output_dir,
         timeout,
     })
@@ -559,6 +684,8 @@ fn print_help() {
   cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]
   cargo run -p app -- audit [--target <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- plan <chemin-audit> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
+  cargo run -p app -- implementation-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
+  cargo run -p app -- impl-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
@@ -573,6 +700,8 @@ Exemples:
   cargo run -q -p app -- audit --timeout-seconds 120
   cargo run -q -p app -- plan .audit\\audit-1781887189.md
   cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan
+  cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md
+  cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app
   cargo run -q -p app -- review plan .plan\\plan-1781894465.md
   cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md
   cargo run -q -p app -- review implementation crates\\app
@@ -697,6 +826,60 @@ fn run_plan(command: &PlanCommand) {
                 }
                 Err(error) => {
                     eprintln!("echec lors de l'enregistrement du plan: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("echec lors de l'appel a codex: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn run_implementation_audit(command: &ImplementationAuditCommand) {
+    let scope = command.implementation_path.as_deref().map_or_else(
+        || "git diff / workspace".to_string(),
+        |path| path.display().to_string(),
+    );
+
+    eprintln!(
+        "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
+        command.plan_path.display(),
+        scope,
+        command.timeout.as_secs()
+    );
+
+    match codex::run_until_final_message(&command.request, command.timeout) {
+        Ok(result) => {
+            let Some(message) = result.final_message else {
+                if !result.status.success() {
+                    print_failure_details(&result.stdout, &result.stderr);
+                    process::exit(result.status.code().unwrap_or(1));
+                }
+
+                eprintln!("codex n'a pas retourne de message final pour l'audit d'implementation");
+                process::exit(1);
+            };
+
+            if !result.status.success() {
+                eprintln!(
+                    "codex a produit un audit d'implementation final mais s'est termine avec le statut {}. Le rapport est conserve.",
+                    result.status
+                );
+                print_failure_details(&result.stdout, &result.stderr);
+            }
+
+            match implementation_audit::save_audit(&command.output_dir, &message) {
+                Ok(path) => {
+                    println!("Audit d'implementation enregistre dans {}", path.display());
+                    println!();
+                    println!("{message}");
+                }
+                Err(error) => {
+                    eprintln!(
+                        "echec lors de l'enregistrement de l'audit d'implementation: {error}"
+                    );
                     process::exit(1);
                 }
             }
@@ -1059,6 +1242,63 @@ mod tests {
     }
 
     #[test]
+    fn parses_implementation_audit_command_with_positional_plan_path() {
+        let command = parse(&["implementation-audit", "Cargo.toml"])
+            .expect("implementation-audit doit etre parse");
+
+        let CliCommand::ImplementationAudit(audit) = command else {
+            panic!("la commande attendue est implementation-audit");
+        };
+
+        assert_eq!(audit.request.mode, CodexMode::Exec);
+        assert_eq!(audit.request.reasoning_effort, ReasoningEffort::High);
+        assert!(audit.output_dir.ends_with(".audit"));
+        assert_eq!(audit.timeout, Duration::from_secs(900));
+        assert!(audit.implementation_path.is_none());
+        assert!(audit.request.prompt.as_deref().is_some_and(|prompt| {
+            prompt.contains("$rust-implementation-plan-audit")
+                && prompt.contains("central Codex skill named rust-implementation-plan-audit")
+                && prompt.contains("No explicit implementation path was provided")
+                && prompt.contains("complete Markdown Rust Implementation Plan Audit report only")
+        }));
+    }
+
+    #[test]
+    fn parses_implementation_audit_command_with_named_options() {
+        let command = parse(&[
+            "impl-audit",
+            "--plan",
+            "Cargo.toml",
+            "--implementation",
+            ".",
+            "--timeout-seconds",
+            "42",
+            "--verbose",
+        ])
+        .expect("impl-audit doit accepter les options nommees");
+
+        let CliCommand::ImplementationAudit(audit) = command else {
+            panic!("la commande attendue est implementation-audit");
+        };
+
+        assert_eq!(audit.timeout, Duration::from_secs(42));
+        assert!(audit.request.verbose);
+        assert!(
+            audit
+                .implementation_path
+                .as_ref()
+                .is_some_and(|path| path.is_dir())
+        );
+        assert!(
+            audit
+                .request
+                .prompt
+                .as_deref()
+                .is_some_and(|prompt| { prompt.contains("Review the implementation evidence at") })
+        );
+    }
+
+    #[test]
     fn parses_review_command_with_positional_type_and_artifact() {
         let command = parse(&["review", "implementation", "."]).expect("review doit etre parse");
 
@@ -1230,6 +1470,20 @@ mod tests {
             error,
             ParseOutcome::Error(
                 "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_implementation_audit_without_plan_path() {
+        let error = parse(&["implementation-audit"])
+            .expect_err("implementation-audit sans plan doit echouer");
+
+        assert_eq!(
+            error,
+            ParseOutcome::Error(
+                "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
                     .to_string()
             )
         );

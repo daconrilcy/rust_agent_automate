@@ -1,0 +1,65 @@
+{
+  "defaults": {
+    "model": null,
+    "reasoning": null,
+    "timeout_seconds": 1800
+  },
+  "steps": [
+    {
+      "name": "audit",
+      "rust_command": ["audit", "--target", "{target}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": true
+    },
+    {
+      "name": "plan",
+      "rust_command": ["plan", "{artifact:audit}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": true
+    },
+    {
+      "name": "dev_review_corrections",
+      "rust_command": ["fix-loop", "plan", "{artifact:plan}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": false
+    },
+    {
+      "name": "alignment_audit",
+      "rust_command": ["implementation-audit", "{artifact:plan}", "--implementation", "{target}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": true
+    },
+    {
+      "name": "alignment_corrections",
+      "rust_command": ["fix-loop", "audit", "{artifact:alignment_audit}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": false
+    },
+    {
+      "name": "commit_push",
+      "rust_command": [
+        "--mode",
+        "exec",
+        "Commit and push the refactoring work for {target}. Initial prompt: {initial_prompt}. Use a concise commit message, preserve unrelated user changes, and report any push blocker."
+      ],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": false
+    }
+  ],
+  "loop_policy": {
+    "audit_step": "alignment_audit",
+    "max_cycles": 2,
+    "clean_markers": [
+      "no actionable findings",
+      "aucun finding actionnable",
+      "aucune correction requise",
+      "no findings"
+    ]
+  }
+}

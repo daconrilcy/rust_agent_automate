@@ -12,6 +12,8 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 - un audit d'implementation depuis un plan via le skill Codex central `rust-implementation-plan-audit`, avec sauvegarde du rapport dans `.audit`
 - une review adversariale via le skill Codex central `adversarial-review`, en precisant si l'entree est un `plan`, un `audit` ou une `implementation`, avec sauvegarde dans `.review`
 - une boucle review/correction via le skill Codex central `rust-review-fix-loop`, en partant d'un `audit`, d'un `plan` ou d'une `implementation`, avec sauvegarde du rapport dans `.fix-loop`
+- un automate JSON via `automate`, capable d'enchainer les services Rust du binaire courant
+- un automate de refactoring via `refactor-automate`, qui cible un dossier donne ou le workspace local par defaut
 
 ## Commandes utiles
 
@@ -32,7 +34,47 @@ cargo run -q -p app -- review implementation crates\app
 cargo run -q -p app -- fix-loop plan .plan\plan-1781894465.md
 cargo run -q -p app -- fix-loop audit .audit\audit-1781887189.md
 cargo run -q -p app -- fix-loop implementation crates\app
+cargo run -q -p app -- automate .\workflow.json "Objectif initial"
+cargo run -q -p app -- refactor-automate --target crates\app "Refactoring SOLID/KISS/DRY"
 ```
+
+## Workflow JSON d'automate
+
+Un workflow definit des etapes qui lancent les commandes Rust du binaire courant.
+
+```json
+{
+  "defaults": {
+    "model": null,
+    "reasoning": null,
+    "timeout_seconds": 1800
+  },
+  "steps": [
+    {
+      "name": "audit",
+      "rust_command": ["audit", "--target", "{target}"],
+      "model": null,
+      "reasoning": null,
+      "fresh_codex_call": true
+    },
+    {
+      "name": "plan",
+      "rust_command": ["plan", "{artifact:audit}"],
+      "fresh_codex_call": true
+    }
+  ]
+}
+```
+
+Champs d'etape:
+- `rust_command`: arguments passes au binaire courant, par exemple `["audit", "--target", "{target}"]`
+- `model`: modele Codex de l'etape, ou `null` pour le modele par defaut
+- `reasoning`: `low`, `medium`, `high`, ou `null` pour le reasoning par defaut
+- `fresh_codex_call`: indique si l'etape repart d'un appel Codex vierge ou depend du contexte precedent
+
+Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`.
+
+`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, dev par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter si l'audit d'alignement ne contient pas de marqueur de sortie propre.
 
 ## Exemples
 

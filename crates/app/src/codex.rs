@@ -7,11 +7,23 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReasoningEffort {
     Low,
     Medium,
     High,
+}
+
+impl<'de> Deserialize<'de> for ReasoningEffort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 pub const DEFAULT_MODEL: &str = "gpt-5.4";
@@ -75,6 +87,7 @@ pub struct CodexRequest {
     pub mode: CodexMode,
     pub prompt: Option<String>,
     pub verbose: bool,
+    pub resume_last: bool,
 }
 
 impl CodexRequest {
@@ -91,7 +104,13 @@ impl CodexRequest {
             mode,
             prompt,
             verbose,
+            resume_last: false,
         }
+    }
+
+    pub fn with_resume_last(mut self, resume_last: bool) -> Self {
+        self.resume_last = resume_last;
+        self
     }
 }
 
@@ -118,7 +137,7 @@ pub fn run(request: &CodexRequest) -> io::Result<RunResult> {
                 stderr: String::new(),
             })
         }
-        CodexMode::Exec => run_exec(command, request.verbose),
+        CodexMode::Exec => run_exec(command, request.verbose, !request.resume_last),
     }
 }
 
@@ -132,7 +151,9 @@ pub fn run_until_final_message(request: &CodexRequest, timeout: Duration) -> io:
             io::ErrorKind::InvalidInput,
             "run_until_final_message requiert le mode exec",
         )),
-        CodexMode::Exec => run_exec_until_final_message(command, request.verbose, timeout),
+        CodexMode::Exec => {
+            run_exec_until_final_message(command, request.verbose, timeout, !request.resume_last)
+        }
     }
 }
 
@@ -152,6 +173,11 @@ fn base_command_args(request: &CodexRequest, inside_git_repository: bool) -> Vec
 
     if request.mode == CodexMode::Exec {
         args.push("exec".to_string());
+
+        if request.resume_last {
+            args.push("resume".to_string());
+            args.push("--last".to_string());
+        }
 
         if !inside_git_repository {
             args.push("--skip-git-repo-check".to_string());
@@ -173,14 +199,10 @@ fn base_command_args(request: &CodexRequest, inside_git_repository: bool) -> Vec
     args
 }
 
-fn run_exec(mut command: Command, verbose: bool) -> io::Result<RunResult> {
+fn run_exec(mut command: Command, verbose: bool, use_color_never: bool) -> io::Result<RunResult> {
     let output_file = temp_output_file_path();
 
-    command
-        .arg("--output-last-message")
-        .arg(&output_file)
-        .arg("--color")
-        .arg("never");
+    append_exec_capture_args(&mut command, &output_file, use_color_never);
 
     if verbose {
         let status = command.status()?;
@@ -211,16 +233,13 @@ fn run_exec_until_final_message(
     mut command: Command,
     verbose: bool,
     timeout: Duration,
+    use_color_never: bool,
 ) -> io::Result<RunResult> {
     let output_file = temp_output_file_path();
     let stderr_file = (!verbose).then(temp_stderr_file_path);
 
-    command
-        .arg("--output-last-message")
-        .arg(&output_file)
-        .arg("--color")
-        .arg("never")
-        .stdin(Stdio::null());
+    append_exec_capture_args(&mut command, &output_file, use_color_never);
+    command.stdin(Stdio::null());
 
     if verbose {
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
@@ -280,6 +299,14 @@ fn run_exec_until_final_message(
         }
 
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn append_exec_capture_args(command: &mut Command, output_file: &Path, use_color_never: bool) {
+    command.arg("--output-last-message").arg(output_file);
+
+    if use_color_never {
+        command.arg("--color").arg("never");
     }
 }
 
@@ -627,6 +654,64 @@ mod tests {
                 "model_reasoning_effort=\"high\"".to_string(),
                 "Analyse ce repo".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn exec_resume_mode_adds_resume_last_before_prompt() {
+        let request = CodexRequest::new(
+            "gpt-5.5",
+            ReasoningEffort::High,
+            CodexMode::Exec,
+            Some("Continue".to_string()),
+            false,
+        )
+        .with_resume_last(true);
+
+        let args = base_command_args(&request, false);
+
+        assert_eq!(
+            args,
+            vec![
+                "exec".to_string(),
+                "resume".to_string(),
+                "--last".to_string(),
+                "--skip-git-repo-check".to_string(),
+                "--model".to_string(),
+                "gpt-5.5".to_string(),
+                "--config".to_string(),
+                "model_reasoning_effort=\"high\"".to_string(),
+                "Continue".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn capture_args_can_omit_color_for_resume_commands() {
+        let mut command = Command::new("codex");
+        append_exec_capture_args(&mut command, Path::new("last.txt"), false);
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(args, vec!["--output-last-message", "last.txt"]);
+    }
+
+    #[test]
+    fn capture_args_keep_color_for_fresh_exec_commands() {
+        let mut command = Command::new("codex");
+        append_exec_capture_args(&mut command, Path::new("last.txt"), true);
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            args,
+            vec!["--output-last-message", "last.txt", "--color", "never"]
         );
     }
 

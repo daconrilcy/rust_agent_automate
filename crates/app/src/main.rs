@@ -1,4 +1,5 @@
 mod artifact;
+mod automate;
 mod codex;
 mod fix_loop;
 mod implementation_audit;
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Duration;
 
+use automate::{AutomateCommand, RefactorAutomateCommand};
 use codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use fix_loop::FixLoopCommand;
 use implementation_audit::ImplementationAuditCommand;
@@ -28,6 +30,8 @@ fn main() {
         Ok(CliCommand::ImplementationAudit(request)) => run_implementation_audit(&request),
         Ok(CliCommand::Review(request)) => run_review(&request),
         Ok(CliCommand::FixLoop(request)) => run_fix_loop(&request),
+        Ok(CliCommand::Automate(request)) => run_automate(&request),
+        Ok(CliCommand::RefactorAutomate(request)) => run_refactor_automate(&request),
         Err(ParseOutcome::Help) => print_help(),
         Err(ParseOutcome::Error(message)) => {
             eprintln!("{message}");
@@ -46,6 +50,8 @@ enum CliCommand {
     ImplementationAudit(ImplementationAuditCommand),
     Review(ReviewCommand),
     FixLoop(FixLoopCommand),
+    Automate(AutomateCommand),
+    RefactorAutomate(RefactorAutomateCommand),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,6 +93,17 @@ fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
         return parse_fix_loop_args(&args[1..]).map(CliCommand::FixLoop);
     }
 
+    if matches!(args.first().map(String::as_str), Some("automate")) {
+        return parse_automate_args(&args[1..]).map(CliCommand::Automate);
+    }
+
+    if matches!(
+        args.first().map(String::as_str),
+        Some("refactor-automate" | "refactor-auto")
+    ) {
+        return parse_refactor_automate_args(&args[1..]).map(CliCommand::RefactorAutomate);
+    }
+
     parse_run_args(args).map(CliCommand::Run)
 }
 
@@ -95,6 +112,7 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut mode = CodexMode::Interactive;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut prompt_parts: Vec<String> = Vec::new();
 
     let mut index = 0;
@@ -120,6 +138,10 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -143,19 +165,17 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
         ));
     }
 
-    Ok(CodexRequest::new(
-        model,
-        reasoning_effort,
-        mode,
-        prompt,
-        verbose,
-    ))
+    Ok(
+        CodexRequest::new(model, reasoning_effort, mode, prompt, verbose)
+            .with_resume_last(resume_last),
+    )
 }
 
 fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut target_dir: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
     let mut timeout = Duration::from_secs(900);
@@ -193,6 +213,10 @@ fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -218,7 +242,8 @@ fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
             CodexMode::Exec,
             Some(prompt),
             verbose,
-        ),
+        )
+        .with_resume_last(resume_last),
         workspace_root,
         target_dir,
         output_dir,
@@ -230,6 +255,7 @@ fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut audit_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
     let mut timeout = Duration::from_secs(900);
@@ -272,6 +298,10 @@ fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -308,7 +338,8 @@ fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
             CodexMode::Exec,
             Some(prompt),
             verbose,
-        ),
+        )
+        .with_resume_last(resume_last),
         workspace_root,
         audit_path,
         output_dir,
@@ -322,6 +353,7 @@ fn parse_implementation_audit_args(
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut plan_path: Option<PathBuf> = None;
     let mut implementation_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -375,6 +407,10 @@ fn parse_implementation_audit_args(
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -421,7 +457,8 @@ fn parse_implementation_audit_args(
             CodexMode::Exec,
             Some(prompt),
             verbose,
-        ),
+        )
+        .with_resume_last(resume_last),
         workspace_root,
         plan_path,
         implementation_path,
@@ -434,6 +471,7 @@ fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut subject: Option<ReviewSubject> = None;
     let mut artifact_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -487,6 +525,10 @@ fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -536,7 +578,8 @@ fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
             CodexMode::Exec,
             Some(prompt),
             verbose,
-        ),
+        )
+        .with_resume_last(resume_last),
         workspace_root,
         subject,
         artifact_path,
@@ -549,6 +592,7 @@ fn parse_fix_loop_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> 
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
+    let mut resume_last = false;
     let mut input_kind: Option<ReviewSubject> = None;
     let mut artifact_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -602,6 +646,10 @@ fn parse_fix_loop_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> 
                 verbose = true;
                 index += 1;
             }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
             }
@@ -651,7 +699,8 @@ fn parse_fix_loop_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> 
             CodexMode::Exec,
             Some(prompt),
             verbose,
-        ),
+        )
+        .with_resume_last(resume_last),
         workspace_root,
         input_kind,
         artifact_path,
@@ -665,6 +714,114 @@ fn parse_fix_loop_input_kind(value: &str) -> Result<ReviewSubject, ParseOutcome>
         ParseOutcome::Error(format!(
             "type d'entree fix-loop invalide: {value}. Valeurs attendues: plan, audit, implementation"
         ))
+    })
+}
+
+fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
+    let mut workflow_path: Option<PathBuf> = None;
+    let mut prompt_parts: Vec<String> = Vec::new();
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseOutcome::Help),
+            "--workflow" => {
+                let value = next_value(args, index, "--workflow")?;
+                if workflow_path.is_some() {
+                    return Err(ParseOutcome::Error(
+                        "le workflow automate a deja ete fourni".to_string(),
+                    ));
+                }
+                workflow_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
+            }
+            value => {
+                if workflow_path.is_none() {
+                    workflow_path = Some(PathBuf::from(value));
+                    index += 1;
+                    continue;
+                }
+
+                prompt_parts.extend_from_slice(&args[index..]);
+                break;
+            }
+        }
+    }
+
+    let workflow_path = workflow_path.ok_or_else(|| {
+        ParseOutcome::Error(
+            "la commande automate requiert un workflow JSON. Exemple: cargo run -p app -- automate workflow.json \"Objectif\""
+                .to_string(),
+        )
+    })?;
+    let workflow = automate::load_workflow(&workflow_path).map_err(ParseOutcome::Error)?;
+    let initial_prompt = if prompt_parts.is_empty() {
+        String::from("Executer le workflow automate fourni.")
+    } else {
+        prompt_parts.join(" ")
+    };
+
+    Ok(AutomateCommand {
+        workflow_path,
+        workflow,
+        initial_prompt,
+    })
+}
+
+fn parse_refactor_automate_args(args: &[String]) -> Result<RefactorAutomateCommand, ParseOutcome> {
+    let mut workflow_path: Option<PathBuf> = None;
+    let mut target_dir: Option<PathBuf> = None;
+    let mut prompt_parts: Vec<String> = Vec::new();
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseOutcome::Help),
+            "--workflow" => {
+                let value = next_value(args, index, "--workflow")?;
+                workflow_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--target" => {
+                let value = next_value(args, index, "--target")?;
+                target_dir = Some(PathBuf::from(value));
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
+            }
+            _ => {
+                prompt_parts.extend_from_slice(&args[index..]);
+                break;
+            }
+        }
+    }
+
+    let workflow = match workflow_path {
+        Some(path) => automate::load_workflow(&path).map_err(ParseOutcome::Error)?,
+        None => automate::default_refactor_workflow(),
+    };
+    let workspace_root = env::current_dir().map_err(|error| {
+        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
+    })?;
+    let target_dir = automate::resolve_target_dir(target_dir.unwrap_or(workspace_root))
+        .map_err(ParseOutcome::Error)?;
+    let initial_prompt = if prompt_parts.is_empty() {
+        format!(
+            "Refactorer {} pour ameliorer structure, maintenabilite, evolutivite et robustesse en respectant SOLID, YAGNI, KISS et DRY.",
+            target_dir.display()
+        )
+    } else {
+        prompt_parts.join(" ")
+    };
+
+    Ok(RefactorAutomateCommand {
+        workflow,
+        initial_prompt,
+        target_dir,
     })
 }
 
@@ -689,6 +846,8 @@ fn print_help() {
   cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
   cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
+  cargo run -p app -- automate <workflow.json> [prompt]
+  cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [prompt]
 
 Exemples:
   cargo run -q -p app -- --model gpt-5.4 --reasoning low
@@ -708,7 +867,9 @@ Exemples:
   cargo run -q -p app -- fix-loop plan .plan\\plan-1781894465.md
   cargo run -q -p app -- fix-loop audit .audit\\audit-1781887189.md
   cargo run -q -p app -- fix-loop implementation crates\\app
-  cargo run -q -p app -- loop implementation crates\\app"
+  cargo run -q -p app -- loop implementation crates\\app
+  cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\"
+  cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\""
     );
 }
 
@@ -985,6 +1146,67 @@ fn run_fix_loop(command: &FixLoopCommand) {
     }
 }
 
+fn run_automate(command: &AutomateCommand) {
+    let target_dir = match env::current_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("impossible de lire le repertoire courant: {error}");
+            process::exit(1);
+        }
+    };
+
+    eprintln!(
+        "Automate Codex depuis {} sur {}...",
+        command.workflow_path.display(),
+        target_dir.display()
+    );
+    run_automate_workflow(&command.workflow, &command.initial_prompt, &target_dir);
+}
+
+fn run_refactor_automate(command: &RefactorAutomateCommand) {
+    eprintln!(
+        "Automate de refactoring sur {}...",
+        command.target_dir.display()
+    );
+    run_automate_workflow(
+        &command.workflow,
+        &command.initial_prompt,
+        &command.target_dir,
+    );
+}
+
+fn run_automate_workflow(workflow: &automate::Workflow, initial_prompt: &str, target_dir: &Path) {
+    match automate::run_workflow(workflow, initial_prompt, target_dir) {
+        Ok(report) => {
+            println!(
+                "Automate termine apres {} cycle(s){}.",
+                report.completed_cycles,
+                if report.clean_stop {
+                    " (audit d'alignement sans correction actionnable detectee)"
+                } else {
+                    ""
+                }
+            );
+
+            for result in report.step_results {
+                let artifact = result
+                    .artifact_path
+                    .as_ref()
+                    .map(|path| format!(" -> {}", path.display()))
+                    .unwrap_or_default();
+                println!(
+                    "- cycle {} / {}: statut {:?}{}",
+                    result.cycle, result.name, result.status_code, artifact
+                );
+            }
+        }
+        Err(error) => {
+            eprintln!("echec de l'automate: {error}");
+            process::exit(1);
+        }
+    }
+}
+
 fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
     let seconds = value.parse::<u64>().map_err(|_| {
         ParseOutcome::Error(format!(
@@ -1087,6 +1309,9 @@ mod tests {
             CliCommand::ImplementationAudit(command) => &command.request,
             CliCommand::Review(command) => &command.request,
             CliCommand::FixLoop(command) => &command.request,
+            CliCommand::Automate(_) | CliCommand::RefactorAutomate(_) => {
+                panic!("les automates ne portent pas de requete Codex directe")
+            }
         }
     }
 
@@ -1452,6 +1677,36 @@ mod tests {
         assert_eq!(fix_loop.input_kind, ReviewSubject::Implementation);
         assert_eq!(fix_loop.timeout, Duration::from_secs(42));
         assert!(fix_loop.request.verbose);
+    }
+
+    #[test]
+    fn parses_refactor_automate_with_default_workflow() {
+        let command = parse(&["refactor-automate", "--target", ".", "Durcir", "le", "code"])
+            .expect("refactor-automate doit etre parse");
+
+        let CliCommand::RefactorAutomate(command) = command else {
+            panic!("la commande attendue est refactor-automate");
+        };
+
+        assert_eq!(
+            normalize_path(&command.target_dir),
+            normalize_path(&env::current_dir().expect("cwd"))
+        );
+        assert_eq!(command.initial_prompt, "Durcir le code");
+        assert_eq!(command.workflow.steps[0].name, "audit");
+    }
+
+    #[test]
+    fn rejects_automate_without_workflow() {
+        let error = parse(&["automate"]).expect_err("automate sans workflow doit echouer");
+
+        assert_eq!(
+            error,
+            ParseOutcome::Error(
+                "la commande automate requiert un workflow JSON. Exemple: cargo run -p app -- automate workflow.json \"Objectif\""
+                    .to_string()
+            )
+        );
     }
 
     #[test]

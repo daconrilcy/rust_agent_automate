@@ -1,18 +1,20 @@
 mod artifact;
+mod audit;
 mod automate;
 mod codex;
+mod command_registry;
 mod fix_loop;
 mod implementation_audit;
 mod plan;
+mod reporting;
 mod review;
 
 use std::env;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Duration;
 
+use audit::AuditCommand;
 use automate::{AutomateCommand, RefactorAutomateCommand};
 use codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use fix_loop::FixLoopCommand;
@@ -25,11 +27,11 @@ fn main() {
 
     match parse_args(&args) {
         Ok(CliCommand::Run(request)) => run_request(&request),
-        Ok(CliCommand::Audit(request)) => run_audit(&request),
-        Ok(CliCommand::Plan(request)) => run_plan(&request),
-        Ok(CliCommand::ImplementationAudit(request)) => run_implementation_audit(&request),
-        Ok(CliCommand::Review(request)) => run_review(&request),
-        Ok(CliCommand::FixLoop(request)) => run_fix_loop(&request),
+        Ok(CliCommand::Audit(request)) => audit::run(&request),
+        Ok(CliCommand::Plan(request)) => plan::run(&request),
+        Ok(CliCommand::ImplementationAudit(request)) => implementation_audit::run(&request),
+        Ok(CliCommand::Review(request)) => review::run(&request),
+        Ok(CliCommand::FixLoop(request)) => fix_loop::run(&request),
         Ok(CliCommand::Automate(request)) => run_automate(&request),
         Ok(CliCommand::RefactorAutomate(request)) => run_refactor_automate(&request),
         Err(ParseOutcome::Help) => print_help(),
@@ -55,53 +57,26 @@ enum CliCommand {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct AuditCommand {
-    request: CodexRequest,
-    workspace_root: PathBuf,
-    target_dir: PathBuf,
-    output_dir: PathBuf,
-    timeout: Duration,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum ParseOutcome {
+pub(crate) enum ParseOutcome {
     Help,
     Error(String),
 }
 
 fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
-    if matches!(args.first().map(String::as_str), Some("audit")) {
-        return parse_audit_args(&args[1..]).map(CliCommand::Audit);
-    }
-
-    if matches!(args.first().map(String::as_str), Some("plan")) {
-        return parse_plan_args(&args[1..]).map(CliCommand::Plan);
-    }
-
-    if matches!(
-        args.first().map(String::as_str),
-        Some("implementation-audit" | "impl-audit")
-    ) {
-        return parse_implementation_audit_args(&args[1..]).map(CliCommand::ImplementationAudit);
-    }
-
-    if matches!(args.first().map(String::as_str), Some("review")) {
-        return parse_review_args(&args[1..]).map(CliCommand::Review);
-    }
-
-    if matches!(args.first().map(String::as_str), Some("fix-loop" | "loop")) {
-        return parse_fix_loop_args(&args[1..]).map(CliCommand::FixLoop);
-    }
-
-    if matches!(args.first().map(String::as_str), Some("automate")) {
-        return parse_automate_args(&args[1..]).map(CliCommand::Automate);
-    }
-
-    if matches!(
-        args.first().map(String::as_str),
-        Some("refactor-automate" | "refactor-auto")
-    ) {
-        return parse_refactor_automate_args(&args[1..]).map(CliCommand::RefactorAutomate);
+    match command_registry::canonical_name(args.first().map(String::as_str)) {
+        Some("audit") => return audit::parse_args(&args[1..]).map(CliCommand::Audit),
+        Some("plan") => return plan::parse_args(&args[1..]).map(CliCommand::Plan),
+        Some("implementation-audit") => {
+            return implementation_audit::parse_args(&args[1..])
+                .map(CliCommand::ImplementationAudit);
+        }
+        Some("review") => return review::parse_args(&args[1..]).map(CliCommand::Review),
+        Some("fix-loop") => return fix_loop::parse_args(&args[1..]).map(CliCommand::FixLoop),
+        Some("automate") => return parse_automate_args(&args[1..]).map(CliCommand::Automate),
+        Some("refactor-automate") => {
+            return parse_refactor_automate_args(&args[1..]).map(CliCommand::RefactorAutomate);
+        }
+        Some(_) | None => {}
     }
 
     parse_run_args(args).map(CliCommand::Run)
@@ -169,552 +144,6 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
         CodexRequest::new(model, reasoning_effort, mode, prompt, verbose)
             .with_resume_last(resume_last),
     )
-}
-
-fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
-    let mut target_dir: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
-
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--target" => {
-                let value = next_value(args, index, "--target")?;
-                target_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                return Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour audit: {value}"
-                )));
-            }
-        }
-    }
-
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let target_dir = resolve_audit_target(target_dir.unwrap_or_else(|| workspace_root.clone()))?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".audit"));
-    let prompt = build_audit_prompt(&workspace_root, &target_dir, &output_dir);
-
-    Ok(AuditCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
-        workspace_root,
-        target_dir,
-        output_dir,
-        timeout,
-    })
-}
-
-fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
-    let mut audit_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
-
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--audit" => {
-                let value = next_value(args, index, "--audit")?;
-                if audit_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "l'audit a deja ete fourni pour la commande plan".to_string(),
-                    ));
-                }
-                audit_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if audit_path.is_some() {
-                    return Err(ParseOutcome::Error(format!(
-                        "argument inattendu pour plan: {value}"
-                    )));
-                }
-
-                audit_path = Some(PathBuf::from(value));
-                index += 1;
-            }
-        }
-    }
-
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let audit_path = plan::resolve_audit_file(audit_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
-                .to_string(),
-        )
-    })?)
-    .map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".plan"));
-    let prompt = plan::build_prompt(&workspace_root, &audit_path, &output_dir);
-
-    Ok(PlanCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
-        workspace_root,
-        audit_path,
-        output_dir,
-        timeout,
-    })
-}
-
-fn parse_implementation_audit_args(
-    args: &[String],
-) -> Result<ImplementationAuditCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
-    let mut plan_path: Option<PathBuf> = None;
-    let mut implementation_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
-
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--plan" => {
-                let value = next_value(args, index, "--plan")?;
-                if plan_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le plan d'implementation a deja ete fourni".to_string(),
-                    ));
-                }
-                plan_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--implementation" => {
-                let value = next_value(args, index, "--implementation")?;
-                if implementation_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le chemin d'implementation a deja ete fourni".to_string(),
-                    ));
-                }
-                implementation_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if plan_path.is_some() {
-                    return Err(ParseOutcome::Error(format!(
-                        "argument inattendu pour implementation-audit: {value}"
-                    )));
-                }
-
-                plan_path = Some(PathBuf::from(value));
-                index += 1;
-            }
-        }
-    }
-
-    let plan_path = plan_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
-                .to_string(),
-        )
-    })?;
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let plan_path =
-        implementation_audit::resolve_plan_file(plan_path).map_err(ParseOutcome::Error)?;
-    let implementation_path = implementation_path
-        .map(implementation_audit::resolve_implementation_path)
-        .transpose()
-        .map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".audit"));
-    let prompt = implementation_audit::build_prompt(
-        &workspace_root,
-        &plan_path,
-        implementation_path.as_deref(),
-        &output_dir,
-    );
-
-    Ok(ImplementationAuditCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
-        workspace_root,
-        plan_path,
-        implementation_path,
-        output_dir,
-        timeout,
-    })
-}
-
-fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
-    let mut subject: Option<ReviewSubject> = None;
-    let mut artifact_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
-
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--type" => {
-                let value = next_value(args, index, "--type")?;
-                if subject.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le type de review a deja ete fourni".to_string(),
-                    ));
-                }
-                subject = Some(value.parse().map_err(ParseOutcome::Error)?);
-                index += 2;
-            }
-            "--artifact" => {
-                let value = next_value(args, index, "--artifact")?;
-                if artifact_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "l'artefact de review a deja ete fourni".to_string(),
-                    ));
-                }
-                artifact_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if subject.is_none() {
-                    subject = Some(value.parse().map_err(ParseOutcome::Error)?);
-                    index += 1;
-                    continue;
-                }
-
-                if artifact_path.is_none() {
-                    artifact_path = Some(PathBuf::from(value));
-                    index += 1;
-                    continue;
-                }
-
-                return Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour review: {value}"
-                )));
-            }
-        }
-    }
-
-    let subject = subject.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande review requiert un type: plan, audit ou implementation".to_string(),
-        )
-    })?;
-    let artifact_path = artifact_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande review requiert un artefact. Exemple: cargo run -p app -- review plan .plan\\plan.md"
-                .to_string(),
-        )
-    })?;
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let artifact_path =
-        review::resolve_artifact_path(subject, artifact_path).map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".review"));
-    let prompt = review::build_prompt(&workspace_root, subject, &artifact_path, &output_dir);
-
-    Ok(ReviewCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
-        workspace_root,
-        subject,
-        artifact_path,
-        output_dir,
-        timeout,
-    })
-}
-
-fn parse_fix_loop_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
-    let mut input_kind: Option<ReviewSubject> = None;
-    let mut artifact_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(1800);
-
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--type" => {
-                let value = next_value(args, index, "--type")?;
-                if input_kind.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le type d'entree de fix-loop a deja ete fourni".to_string(),
-                    ));
-                }
-                input_kind = Some(parse_fix_loop_input_kind(value)?);
-                index += 2;
-            }
-            "--artifact" => {
-                let value = next_value(args, index, "--artifact")?;
-                if artifact_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "l'artefact de fix-loop a deja ete fourni".to_string(),
-                    ));
-                }
-                artifact_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if input_kind.is_none() {
-                    input_kind = Some(parse_fix_loop_input_kind(value)?);
-                    index += 1;
-                    continue;
-                }
-
-                if artifact_path.is_none() {
-                    artifact_path = Some(PathBuf::from(value));
-                    index += 1;
-                    continue;
-                }
-
-                return Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour fix-loop: {value}"
-                )));
-            }
-        }
-    }
-
-    let input_kind = input_kind.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande fix-loop requiert un type: plan, audit ou implementation".to_string(),
-        )
-    })?;
-    let artifact_path = artifact_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande fix-loop requiert un artefact. Exemple: cargo run -p app -- fix-loop plan .plan\\plan.md"
-                .to_string(),
-        )
-    })?;
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let artifact_path =
-        fix_loop::resolve_artifact_path(input_kind, artifact_path).map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".fix-loop"));
-    let prompt = fix_loop::build_prompt(&workspace_root, input_kind, &artifact_path, &output_dir);
-
-    Ok(FixLoopCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
-        workspace_root,
-        input_kind,
-        artifact_path,
-        output_dir,
-        timeout,
-    })
-}
-
-fn parse_fix_loop_input_kind(value: &str) -> Result<ReviewSubject, ParseOutcome> {
-    value.parse().map_err(|_| {
-        ParseOutcome::Error(format!(
-            "type d'entree fix-loop invalide: {value}. Valeurs attendues: plan, audit, implementation"
-        ))
-    })
 }
 
 fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
@@ -825,7 +254,7 @@ fn parse_refactor_automate_args(args: &[String]) -> Result<RefactorAutomateComma
     })
 }
 
-fn next_value<'a>(
+pub(crate) fn next_value<'a>(
     args: &'a [String],
     index: usize,
     option_name: &str,
@@ -836,54 +265,24 @@ fn next_value<'a>(
 }
 
 fn print_help() {
+    println!("Usage:");
     println!(
-        "Usage:
-  cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]
-  cargo run -p app -- audit [--target <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- plan <chemin-audit> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- implementation-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- impl-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
-  cargo run -p app -- automate <workflow.json> [prompt]
-  cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [prompt]
-
-Exemples:
-  cargo run -q -p app -- --model gpt-5.4 --reasoning low
-  cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low \"Explique ce depot\"
-  cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low \"Explique ce depot\"
-  cargo run -q -p app -- audit
-  cargo run -q -p app -- audit --target ..\\mon-projet
-  cargo run -q -p app -- audit --output-dir .audit
-  cargo run -q -p app -- audit --timeout-seconds 120
-  cargo run -q -p app -- plan .audit\\audit-1781887189.md
-  cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan
-  cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md
-  cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app
-  cargo run -q -p app -- review plan .plan\\plan-1781894465.md
-  cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md
-  cargo run -q -p app -- review implementation crates\\app
-  cargo run -q -p app -- fix-loop plan .plan\\plan-1781894465.md
-  cargo run -q -p app -- fix-loop audit .audit\\audit-1781887189.md
-  cargo run -q -p app -- fix-loop implementation crates\\app
-  cargo run -q -p app -- loop implementation crates\\app
-  cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\"
-  cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\""
+        "  cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]"
     );
-}
-
-fn print_failure_details(stdout: &str, stderr: &str) {
-    let stderr = stderr.trim();
-    let stdout = stdout.trim();
-
-    if !stderr.is_empty() {
-        eprintln!("{stderr}");
-        return;
+    for line in command_registry::usage_lines() {
+        println!("  {line}");
     }
-
-    if !stdout.is_empty() {
-        eprintln!("{stdout}");
+    println!();
+    println!("Exemples:");
+    println!("  cargo run -q -p app -- --model gpt-5.4 --reasoning low");
+    println!(
+        "  cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low \"Explique ce depot\""
+    );
+    println!(
+        "  cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low \"Explique ce depot\""
+    );
+    for line in command_registry::example_lines() {
+        println!("  {line}");
     }
 }
 
@@ -895,248 +294,14 @@ fn run_request(request: &CodexRequest) {
                     println!("{message}");
                 }
             } else {
-                print_failure_details(&result.stdout, &result.stderr);
+                let stderr = result.stderr.trim();
+                let stdout = result.stdout.trim();
+                if !stderr.is_empty() {
+                    eprintln!("{stderr}");
+                } else if !stdout.is_empty() {
+                    eprintln!("{stdout}");
+                }
                 process::exit(result.status.code().unwrap_or(1));
-            }
-        }
-        Err(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_audit(command: &AuditCommand) {
-    eprintln!(
-        "Audit Codex en cours sur {} (timeout: {} secondes)...",
-        command.target_dir.display(),
-        command.timeout.as_secs()
-    );
-
-    match codex::run_until_final_message(&command.request, command.timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!("codex n'a pas retourne de message final pour l'audit");
-                process::exit(1);
-            };
-
-            if !result.status.success() {
-                eprintln!(
-                    "codex a produit un rapport final mais s'est termine avec le statut {}. Le rapport est conserve.",
-                    result.status
-                );
-                print_failure_details(&result.stdout, &result.stderr);
-            }
-
-            match save_audit_report(&command.output_dir, &message) {
-                Ok(path) => {
-                    println!("Audit enregistre dans {}", path.display());
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    eprintln!("echec lors de l'enregistrement de l'audit: {error}");
-                    process::exit(1);
-                }
-            }
-        }
-        Err(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_plan(command: &PlanCommand) {
-    eprintln!(
-        "Plan Codex en cours depuis {} (timeout: {} secondes)...",
-        command.audit_path.display(),
-        command.timeout.as_secs()
-    );
-
-    match codex::run_until_final_message(&command.request, command.timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!("codex n'a pas retourne de message final pour le plan");
-                process::exit(1);
-            };
-
-            if !result.status.success() {
-                eprintln!(
-                    "codex a produit un plan final mais s'est termine avec le statut {}. Le plan est conserve.",
-                    result.status
-                );
-                print_failure_details(&result.stdout, &result.stderr);
-            }
-
-            match plan::save_plan(&command.output_dir, &message) {
-                Ok(path) => {
-                    println!("Plan enregistre dans {}", path.display());
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    eprintln!("echec lors de l'enregistrement du plan: {error}");
-                    process::exit(1);
-                }
-            }
-        }
-        Err(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_implementation_audit(command: &ImplementationAuditCommand) {
-    let scope = command.implementation_path.as_deref().map_or_else(
-        || "git diff / workspace".to_string(),
-        |path| path.display().to_string(),
-    );
-
-    eprintln!(
-        "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
-        command.plan_path.display(),
-        scope,
-        command.timeout.as_secs()
-    );
-
-    match codex::run_until_final_message(&command.request, command.timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!("codex n'a pas retourne de message final pour l'audit d'implementation");
-                process::exit(1);
-            };
-
-            if !result.status.success() {
-                eprintln!(
-                    "codex a produit un audit d'implementation final mais s'est termine avec le statut {}. Le rapport est conserve.",
-                    result.status
-                );
-                print_failure_details(&result.stdout, &result.stderr);
-            }
-
-            match implementation_audit::save_audit(&command.output_dir, &message) {
-                Ok(path) => {
-                    println!("Audit d'implementation enregistre dans {}", path.display());
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    eprintln!(
-                        "echec lors de l'enregistrement de l'audit d'implementation: {error}"
-                    );
-                    process::exit(1);
-                }
-            }
-        }
-        Err(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_review(command: &ReviewCommand) {
-    eprintln!(
-        "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
-        command.subject,
-        command.artifact_path.display(),
-        command.timeout.as_secs()
-    );
-
-    match codex::run_until_final_message(&command.request, command.timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!("codex n'a pas retourne de message final pour la review");
-                process::exit(1);
-            };
-
-            if !result.status.success() {
-                eprintln!(
-                    "codex a produit une review finale mais s'est termine avec le statut {}. La review est conservee.",
-                    result.status
-                );
-                print_failure_details(&result.stdout, &result.stderr);
-            }
-
-            match review::save_review(&command.output_dir, &message) {
-                Ok(path) => {
-                    println!("Review enregistree dans {}", path.display());
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    eprintln!("echec lors de l'enregistrement de la review: {error}");
-                    process::exit(1);
-                }
-            }
-        }
-        Err(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_fix_loop(command: &FixLoopCommand) {
-    eprintln!(
-        "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
-        command.input_kind,
-        command.artifact_path.display(),
-        command.timeout.as_secs()
-    );
-
-    match codex::run_until_final_message(&command.request, command.timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!("codex n'a pas retourne de message final pour fix-loop");
-                process::exit(1);
-            };
-
-            if !result.status.success() {
-                eprintln!(
-                    "codex a produit un rapport final mais s'est termine avec le statut {}. Le rapport est conserve.",
-                    result.status
-                );
-                print_failure_details(&result.stdout, &result.stderr);
-            }
-
-            match fix_loop::save_report(&command.output_dir, &message) {
-                Ok(path) => {
-                    println!("Rapport fix-loop enregistre dans {}", path.display());
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    eprintln!("echec lors de l'enregistrement du rapport fix-loop: {error}");
-                    process::exit(1);
-                }
             }
         }
         Err(error) => {
@@ -1207,7 +372,7 @@ fn run_automate_workflow(workflow: &automate::Workflow, initial_prompt: &str, ta
     }
 }
 
-fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
+pub(crate) fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
     let seconds = value.parse::<u64>().map_err(|_| {
         ParseOutcome::Error(format!(
             "timeout invalide: {value}. Valeur attendue: nombre de secondes positif"
@@ -1223,74 +388,17 @@ fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
     Ok(Duration::from_secs(seconds))
 }
 
-fn build_audit_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path) -> String {
-    format!(
-        concat!(
-            "Use $rust-refactor-audit to audit the Rust code located at \"{}\".\n",
-            "The audit must use the central Codex skill named rust-refactor-audit, follow its SKILL.md instructions, ",
-            "and apply its references/audit-rubric.md rubric.\n",
-            "The current local workspace running this command is \"{}\" and the audit report will be saved by the wrapper under \"{}\".\n",
-            "The target directory may not be a Git repository; if git commands fail for that reason, mention it briefly and continue.\n",
-            "Inspect the current workspace before concluding and produce the final answer as a complete Markdown audit report only.\n",
-            "Use this exact section order:\n",
-            "1. Scope\n",
-            "2. Architecture Snapshot\n",
-            "3. Key Findings\n",
-            "4. Principle Review (SOLID / DRY / KISS / YAGNI)\n",
-            "5. Refactoring Roadmap\n",
-            "6. Quick Wins\n",
-            "7. Open Questions / Validation Needed\n"
-        ),
-        target_dir.display(),
-        workspace_root.display(),
-        output_dir.display()
-    )
-}
-
-fn resolve_audit_target(path: PathBuf) -> Result<PathBuf, ParseOutcome> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        env::current_dir()
-            .map_err(|error| {
-                ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-            })?
-            .join(path)
-    };
-
-    let metadata = fs::metadata(&path).map_err(|error| {
-        ParseOutcome::Error(format!(
-            "impossible d'acceder au dossier cible {}: {error}",
-            path.display()
-        ))
-    })?;
-
-    if !metadata.is_dir() {
-        return Err(ParseOutcome::Error(format!(
-            "le chemin cible doit etre un dossier: {}",
-            path.display()
-        )));
-    }
-
-    fs::canonicalize(&path).map_err(|error| {
-        ParseOutcome::Error(format!(
-            "impossible de resoudre le dossier cible {}: {error}",
-            path.display()
-        ))
-    })
-}
-
-fn save_audit_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "audit", content)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::codex::ReasoningEffort;
 
     fn normalize_path(path: &Path) -> String {
-        path.display().to_string().replace("\\\\?\\", "")
+        std::fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+            .to_string()
+            .replace("\\\\?\\", "")
     }
 
     fn parse(input: &[&str]) -> Result<CliCommand, ParseOutcome> {
@@ -1692,6 +800,19 @@ mod tests {
             normalize_path(&command.target_dir),
             normalize_path(&env::current_dir().expect("cwd"))
         );
+        assert_eq!(command.initial_prompt, "Durcir le code");
+        assert_eq!(command.workflow.steps[0].name, "audit");
+    }
+
+    #[test]
+    fn parses_refactor_automate_alias() {
+        let command = parse(&["refactor-auto", "--target", ".", "Durcir", "le", "code"])
+            .expect("refactor-auto doit etre parse");
+
+        let CliCommand::RefactorAutomate(command) = command else {
+            panic!("la commande attendue est refactor-automate");
+        };
+
         assert_eq!(command.initial_prompt, "Durcir le code");
         assert_eq!(command.workflow.steps[0].name, "audit");
     }

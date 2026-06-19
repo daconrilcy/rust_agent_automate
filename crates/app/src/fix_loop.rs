@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::codex::CodexRequest;
+use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use crate::reporting::{self, ReportSpec};
 use crate::review::{self, ReviewSubject};
+use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FixLoopCommand {
@@ -48,6 +50,156 @@ pub fn build_prompt(
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     artifact::save_timestamped_markdown(output_dir, "fix-loop", content)
+}
+
+pub fn run(command: &FixLoopCommand) {
+    eprintln!(
+        "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
+        command.input_kind,
+        command.artifact_path.display(),
+        command.timeout.as_secs()
+    );
+
+    reporting::run_codex_report(
+        &command.request,
+        command.timeout,
+        ReportSpec {
+            command_name: "fix-loop",
+            saved_label: "rapport fix-loop",
+            final_label: "rapport fix-loop",
+            missing_message_label: "rapport fix-loop",
+            output_dir: &command.output_dir,
+            save: save_report,
+            clean_detector: None,
+        },
+    );
+}
+
+pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
+    let mut verbose = false;
+    let mut resume_last = false;
+    let mut input_kind: Option<ReviewSubject> = None;
+    let mut artifact_path: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
+    let mut timeout = Duration::from_secs(1800);
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseOutcome::Help),
+            "--model" => {
+                let value = next_value(args, index, "--model")?;
+                model = value.to_owned();
+                index += 2;
+            }
+            "--reasoning" => {
+                let value = next_value(args, index, "--reasoning")?;
+                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
+                index += 2;
+            }
+            "--type" => {
+                let value = next_value(args, index, "--type")?;
+                if input_kind.is_some() {
+                    return Err(ParseOutcome::Error(
+                        "le type d'entree de fix-loop a deja ete fourni".to_string(),
+                    ));
+                }
+                input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
+                index += 2;
+            }
+            "--artifact" => {
+                let value = next_value(args, index, "--artifact")?;
+                if artifact_path.is_some() {
+                    return Err(ParseOutcome::Error(
+                        "l'artefact de fix-loop a deja ete fourni".to_string(),
+                    ));
+                }
+                artifact_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--output-dir" => {
+                let value = next_value(args, index, "--output-dir")?;
+                output_dir = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--timeout-seconds" => {
+                let value = next_value(args, index, "--timeout-seconds")?;
+                timeout = parse_timeout(value)?;
+                index += 2;
+            }
+            "--verbose" => {
+                verbose = true;
+                index += 1;
+            }
+            "--continue-codex" => {
+                resume_last = true;
+                index += 1;
+            }
+            value if value.starts_with("--") => {
+                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
+            }
+            value => {
+                if input_kind.is_none() {
+                    input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
+                    index += 1;
+                    continue;
+                }
+                if artifact_path.is_none() {
+                    artifact_path = Some(PathBuf::from(value));
+                    index += 1;
+                    continue;
+                }
+                return Err(ParseOutcome::Error(format!(
+                    "argument inattendu pour fix-loop: {value}"
+                )));
+            }
+        }
+    }
+
+    let input_kind = input_kind.ok_or_else(|| {
+        ParseOutcome::Error(
+            "la commande fix-loop requiert un type: plan, audit ou implementation".to_string(),
+        )
+    })?;
+    let artifact_path = artifact_path.ok_or_else(|| {
+        ParseOutcome::Error(
+            "la commande fix-loop requiert un artefact. Exemple: cargo run -p app -- fix-loop plan .plan\\plan.md"
+                .to_string(),
+        )
+    })?;
+    let workspace_root = std::env::current_dir().map_err(|error| {
+        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
+    })?;
+    let artifact_path =
+        resolve_artifact_path(input_kind, artifact_path).map_err(ParseOutcome::Error)?;
+    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".fix-loop"));
+    let prompt = build_prompt(&workspace_root, input_kind, &artifact_path, &output_dir);
+
+    Ok(FixLoopCommand {
+        request: CodexRequest::new(
+            model,
+            reasoning_effort,
+            CodexMode::Exec,
+            Some(prompt),
+            verbose,
+        )
+        .with_resume_last(resume_last),
+        workspace_root,
+        input_kind,
+        artifact_path,
+        output_dir,
+        timeout,
+    })
+}
+
+fn parse_input_kind(value: &str) -> Result<ReviewSubject, String> {
+    value.parse::<ReviewSubject>().map_err(|_| {
+        format!(
+            "type d'entree fix-loop invalide: {value}. Valeurs attendues: plan, audit, implementation"
+        )
+    })
 }
 
 #[cfg(test)]

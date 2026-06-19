@@ -4,10 +4,13 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
 use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use crate::command_registry;
+use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomateCommand {
@@ -98,6 +101,16 @@ struct RunContext {
     last_output: String,
     last_artifact: Option<PathBuf>,
     artifacts_by_step: BTreeMap<String, PathBuf>,
+    clean_by_step: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StepExecution {
+    status_code: Option<i32>,
+    success: bool,
+    stdout: String,
+    stderr: String,
+    command_outcome: Option<CommandOutcome>,
 }
 
 pub fn load_workflow(path: &Path) -> Result<Workflow, String> {
@@ -152,6 +165,18 @@ pub fn run_workflow(
     initial_prompt: &str,
     target_dir: &Path,
 ) -> io::Result<AutomateReport> {
+    run_workflow_with_executor(workflow, initial_prompt, target_dir, run_step)
+}
+
+fn run_workflow_with_executor<F>(
+    workflow: &Workflow,
+    initial_prompt: &str,
+    target_dir: &Path,
+    mut run_step: F,
+) -> io::Result<AutomateReport>
+where
+    F: FnMut(&Workflow, &WorkflowStep, &RunContext) -> io::Result<StepExecution>,
+{
     let mut context = RunContext {
         initial_prompt: initial_prompt.to_string(),
         target_dir: target_dir.to_path_buf(),
@@ -177,31 +202,40 @@ pub fn run_workflow(
                 step.name
             );
             let output = run_step(workflow, step, &context)?;
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let artifact_path = extract_artifact_path(&stdout);
+            let artifact_path = output
+                .command_outcome
+                .as_ref()
+                .and_then(|outcome| outcome.artifact_path.clone())
+                .or_else(|| extract_artifact_path(&output.stdout));
             if let Some(path) = &artifact_path {
                 context
                     .artifacts_by_step
                     .insert(step.name.clone(), path.clone());
                 context.last_artifact = Some(path.clone());
             }
-            context.last_output = stdout.clone();
+            if let Some(clean) = output
+                .command_outcome
+                .as_ref()
+                .and_then(|outcome| outcome.clean)
+            {
+                context.clean_by_step.insert(step.name.clone(), clean);
+            }
+            context.last_output = output.stdout.clone();
 
             report.step_results.push(StepResult {
                 cycle,
                 name: step.name.clone(),
-                status_code: output.status.code(),
+                status_code: output.status_code,
                 artifact_path,
             });
 
-            if !output.status.success() {
+            if !output.success {
                 return Err(io::Error::other(format!(
                     "l'etape automate '{}' a echoue avec le statut {}{}{}",
                     step.name,
-                    output.status,
-                    format_stream("stdout", &stdout),
-                    format_stream("stderr", &stderr)
+                    format_status_code(output.status_code),
+                    format_stream("stdout", &output.stdout),
+                    format_stream("stderr", &output.stderr)
                 )));
             }
         }
@@ -255,16 +289,29 @@ fn run_step(
     workflow: &Workflow,
     step: &WorkflowStep,
     context: &RunContext,
-) -> io::Result<std::process::Output> {
+) -> io::Result<StepExecution> {
     let current_exe = env::current_exe()?;
     let mut command = Command::new(current_exe);
+    let outcome_path = temp_outcome_file_path();
     command
         .args(resolve_step_args(workflow, step, context))
+        .env(COMMAND_OUTCOME_PATH_ENV, &outcome_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    command.output()
+    let output = command.output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let command_outcome = read_command_outcome(&outcome_path)?;
+
+    Ok(StepExecution {
+        status_code: output.status.code(),
+        success: output.status.success(),
+        stdout,
+        stderr,
+        command_outcome,
+    })
 }
 
 fn resolve_step_args(
@@ -324,39 +371,13 @@ fn resolve_step_args(
 }
 
 fn command_accepts_codex_options(args: &[String]) -> bool {
-    matches!(
-        args.first().map(String::as_str),
-        Some(
-            "audit"
-                | "plan"
-                | "implementation-audit"
-                | "impl-audit"
-                | "review"
-                | "fix-loop"
-                | "loop"
-        )
-    )
+    args.first()
+        .map(String::as_str)
+        .is_some_and(command_registry::accepts_codex_options)
 }
 
 fn command_is_direct_run(args: &[String]) -> bool {
-    args.first()
-        .is_none_or(|value| value.starts_with("--") || !known_subcommand(value))
-}
-
-fn known_subcommand(value: &str) -> bool {
-    matches!(
-        value,
-        "audit"
-            | "plan"
-            | "implementation-audit"
-            | "impl-audit"
-            | "review"
-            | "fix-loop"
-            | "loop"
-            | "automate"
-            | "refactor-automate"
-            | "refactor-auto"
-    )
+    command_registry::is_direct_run(args.first().map(String::as_str))
 }
 
 fn expand_placeholders(value: &str, context: &RunContext) -> String {
@@ -387,6 +408,10 @@ fn extract_artifact_path(stdout: &str) -> Option<PathBuf> {
 }
 
 fn is_clean(policy: &LoopPolicy, context: &RunContext) -> bool {
+    if let Some(clean) = context.clean_by_step.get(&policy.audit_step).copied() {
+        return clean;
+    }
+
     let Some(audit_path) = context.artifacts_by_step.get(&policy.audit_step) else {
         return false;
     };
@@ -410,6 +435,36 @@ fn format_stream(label: &str, content: &str) -> String {
     }
 }
 
+fn format_status_code(code: Option<i32>) -> String {
+    code.map_or_else(|| "inconnu".to_string(), |code| code.to_string())
+}
+
+fn temp_outcome_file_path() -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    std::env::temp_dir().join(format!(
+        "rust_agent_command_outcome_{}_{}.json",
+        std::process::id(),
+        timestamp
+    ))
+}
+
+fn read_command_outcome(path: &Path) -> io::Result<Option<CommandOutcome>> {
+    let content = match fs::read(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let _ = fs::remove_file(path);
+
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|error| io::Error::other(format!("resultat structure invalide: {error}")))
+}
+
 fn default_max_cycles() -> u32 {
     2
 }
@@ -431,6 +486,8 @@ const DEFAULT_REFACTOR_WORKFLOW: &str = include_str!("../../../workflows/refacto
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn parses_default_refactor_workflow() {
@@ -656,5 +713,146 @@ mod tests {
                 "Commit"
             ]
         );
+    }
+
+    #[test]
+    fn run_workflow_chains_artifacts_from_structured_outcomes() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[
+                {"name":"audit","rust_command":["audit","--target","{target}"]},
+                {"name":"plan","rust_command":["plan","{artifact:audit}"]}
+              ]
+            }"#,
+        )
+        .expect("workflow valide");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let seen = Rc::clone(&calls);
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            move |workflow, step, context| {
+                seen.borrow_mut()
+                    .push(resolve_step_args(workflow, step, context));
+
+                let artifact_path = match step.name.as_str() {
+                    "audit" => Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
+                    "plan" => Some(PathBuf::from("C:\\repo\\.plan\\plan.md")),
+                    _ => None,
+                };
+
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    command_outcome: Some(CommandOutcome {
+                        command_name: step.name.clone(),
+                        status_code: Some(0),
+                        final_message_present: true,
+                        artifact_path,
+                        clean: None,
+                    }),
+                })
+            },
+        )
+        .expect("workflow execute");
+
+        assert_eq!(report.completed_cycles, 1);
+        let calls = calls.borrow();
+        assert_eq!(
+            calls[0],
+            vec![
+                "audit",
+                "--target",
+                "C:\\repo",
+                "--model",
+                DEFAULT_MODEL,
+                "--reasoning",
+                "low",
+                "--timeout-seconds",
+                "1800"
+            ]
+        );
+        assert_eq!(calls[1][0], "plan");
+        assert_eq!(calls[1][1], "C:\\repo\\.audit\\audit.md");
+    }
+
+    #[test]
+    fn run_workflow_stops_on_failed_step_with_context() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let error = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(17),
+                    success: false,
+                    stdout: "sortie".to_string(),
+                    stderr: "erreur".to_string(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect_err("l'etape doit echouer");
+
+        assert!(
+            error
+                .to_string()
+                .contains("l'etape automate 'audit' a echoue avec le statut 17")
+        );
+        assert!(error.to_string().contains("stdout:\nsortie"));
+        assert!(error.to_string().contains("stderr:\nerreur"));
+    }
+
+    #[test]
+    fn run_workflow_uses_structured_clean_status_for_loop_stop() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[
+                {"name":"alignment_audit","rust_command":["implementation-audit","plan.md"]},
+                {"name":"commit","rust_command":["--mode","exec","Commit"]}
+              ],
+              "loop_policy":{"audit_step":"alignment_audit","max_cycles":3}
+            }"#,
+        )
+        .expect("workflow valide");
+
+        let calls = Rc::new(RefCell::new(0_u32));
+        let seen = Rc::clone(&calls);
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            move |_workflow, step, _context| {
+                *seen.borrow_mut() += 1;
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    command_outcome: Some(CommandOutcome {
+                        command_name: step.name.clone(),
+                        status_code: Some(0),
+                        final_message_present: true,
+                        artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\artifact.md")),
+                        clean: (step.name == "alignment_audit").then_some(true),
+                    }),
+                })
+            },
+        )
+        .expect("workflow execute");
+
+        assert!(report.clean_stop);
+        assert_eq!(report.completed_cycles, 1);
+        assert_eq!(*calls.borrow(), 2);
     }
 }

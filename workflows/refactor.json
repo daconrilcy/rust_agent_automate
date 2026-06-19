@@ -35,7 +35,7 @@
       "rust_command": ["fix-loop", "implementation", "{target}"],
       "model": "GPT-5.4",
       "reasoning": "medium",
-      "fresh_codex_call": false
+      "fresh_codex_call": true
     },
     {
       "name": "alignment_audit",
@@ -60,7 +60,7 @@
       ],
       "model": "GPT-5.4-mini",
       "reasoning": "low",
-      "fresh_codex_call": false
+      "fresh_codex_call": true
     }
   ],
   "loop_policy": {

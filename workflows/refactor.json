@@ -8,14 +8,14 @@
     {
       "name": "audit",
       "rust_command": ["audit", "--target", "{target}"],
-      "model": "GPT-5.4",
+      "model": "gpt-5.4",
       "reasoning": "medium",
       "fresh_codex_call": true
     },
     {
       "name": "plan",
       "rust_command": ["plan", "{artifact:audit}"],
-      "model": "GPT-5.4",
+      "model": "gpt-5.4",
       "reasoning": "medium",
       "fresh_codex_call": true
     },
@@ -26,14 +26,14 @@
         "exec",
         "Use $rust-dev-solid to implement the refactoring plan at {artifact:plan} for {target}. Initial prompt: {initial_prompt}. Apply the scoped Rust changes, preserve unrelated user changes, and run the relevant verification commands before finishing."
       ],
-      "model": "GPT-5.4",
+      "model": "gpt-5.4-mini",
       "reasoning": "low",
       "fresh_codex_call": false
     },
     {
       "name": "dev_review_corrections",
       "rust_command": ["fix-loop", "implementation", "{target}"],
-      "model": "GPT-5.4",
+      "model": "gpt-5.4",
       "reasoning": "medium",
       "fresh_codex_call": true
     },
@@ -58,14 +58,14 @@
         "exec",
         "Commit and push the refactoring work for {target}. Initial prompt: {initial_prompt}. Use a concise commit message, preserve unrelated user changes, and report any push blocker."
       ],
-      "model": "GPT-5.4-mini",
+      "model": "gpt-5.4-mini",
       "reasoning": "low",
       "fresh_codex_call": true
     }
   ],
   "loop_policy": {
     "audit_step": "alignment_audit",
-    "max_cycles": 2,
+    "max_cycles": 3,
     "clean_markers": [
       "no actionable findings",
       "aucun finding actionnable",

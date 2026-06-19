@@ -536,6 +536,47 @@ mod tests {
     }
 
     #[test]
+    fn step_model_reasoning_and_timeout_override_workflow_defaults() {
+        let workflow = parse_workflow(
+            r#"{
+              "defaults": {"model":"gpt-default","reasoning":"low","timeout_seconds":42},
+              "steps":[
+                {
+                  "name":"audit",
+                  "rust_command":["audit","--target","{target}"],
+                  "model":"gpt-step",
+                  "reasoning":"high",
+                  "timeout_seconds":99
+                }
+              ]
+            }"#,
+        )
+        .expect("workflow valide");
+        let context = RunContext {
+            target_dir: PathBuf::from("C:\\repo"),
+            current_cycle: 1,
+            ..RunContext::default()
+        };
+
+        let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
+
+        assert_eq!(
+            args,
+            vec![
+                "audit",
+                "--target",
+                "C:\\repo",
+                "--model",
+                "gpt-step",
+                "--reasoning",
+                "high",
+                "--timeout-seconds",
+                "99"
+            ]
+        );
+    }
+
+    #[test]
     fn injects_resume_for_non_fresh_service_steps() {
         let workflow = parse_workflow(
             r#"{
@@ -553,6 +594,40 @@ mod tests {
 
         assert!(args.contains(&"--continue-codex".to_string()));
         assert_eq!(args[0], "fix-loop");
+    }
+
+    #[test]
+    fn step_model_and_reasoning_override_defaults_for_direct_run_commands() {
+        let workflow = parse_workflow(
+            r#"{
+              "defaults": {"model":"gpt-default","reasoning":"low"},
+              "steps":[
+                {
+                  "name":"implementation",
+                  "rust_command":["--mode","exec","Implement"],
+                  "model":"gpt-step",
+                  "reasoning":"medium"
+                }
+              ]
+            }"#,
+        )
+        .expect("workflow valide");
+        let context = RunContext::default();
+
+        let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
+
+        assert_eq!(
+            args,
+            vec![
+                "--model",
+                "gpt-step",
+                "--reasoning",
+                "medium",
+                "--mode",
+                "exec",
+                "Implement"
+            ]
+        );
     }
 
     #[test]

@@ -3,8 +3,8 @@
 Workspace Cargo minimal pour demarrer un programme Rust.
 
 Le crate `app` contient un premier module Rust capable de lancer `codex` en terminal en configurant:
-- le modele via `--model`
-- le niveau de raisonnement via `--reasoning` (`low`, `medium`, `high`)
+- le modele via `--model` (`gpt-5.4` par defaut)
+- le niveau de raisonnement via `--reasoning` (`low` par defaut, valeurs possibles: `low`, `medium`, `high`)
 - le mode via `--mode` (`interactive` ou `exec`)
 - la verbosite via `--verbose` pour voir la sortie brute de `codex exec`
 - un audit Rust via le skill Codex central `rust-refactor-audit`, avec `--target` pour choisir le dossier a auditer et sauvegarde du rapport dans `.audit`
@@ -37,7 +37,7 @@ cargo run -q -p app -- fix-loop implementation crates\app
 ## Exemples
 
 ```powershell
-cargo run -q -p app -- --model gpt-5.4 --reasoning high
+cargo run -q -p app -- --model gpt-5.4 --reasoning low
 cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low "Resume ce projet"
 cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low "Resume ce projet"
 cargo run -q -p app -- audit

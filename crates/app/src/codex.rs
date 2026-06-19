@@ -14,6 +14,9 @@ pub enum ReasoningEffort {
     High,
 }
 
+pub const DEFAULT_MODEL: &str = "gpt-5.4";
+pub const DEFAULT_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::Low;
+
 impl ReasoningEffort {
     pub fn as_config_value(self) -> &'static str {
         match self {

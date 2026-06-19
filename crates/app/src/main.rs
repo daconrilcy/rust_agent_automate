@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Duration;
 
-use codex::{CodexMode, CodexRequest, ReasoningEffort};
+use codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use fix_loop::FixLoopCommand;
 use implementation_audit::ImplementationAuditCommand;
 use plan::PlanCommand;
@@ -91,8 +91,8 @@ fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
 }
 
 fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::Medium;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut mode = CodexMode::Interactive;
     let mut verbose = false;
     let mut prompt_parts: Vec<String> = Vec::new();
@@ -153,8 +153,8 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
 }
 
 fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::High;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
     let mut target_dir: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -227,8 +227,8 @@ fn parse_audit_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
 }
 
 fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::High;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
     let mut audit_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -319,8 +319,8 @@ fn parse_plan_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
 fn parse_implementation_audit_args(
     args: &[String],
 ) -> Result<ImplementationAuditCommand, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::High;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
     let mut plan_path: Option<PathBuf> = None;
     let mut implementation_path: Option<PathBuf> = None;
@@ -431,8 +431,8 @@ fn parse_implementation_audit_args(
 }
 
 fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::High;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
     let mut subject: Option<ReviewSubject> = None;
     let mut artifact_path: Option<PathBuf> = None;
@@ -546,8 +546,8 @@ fn parse_review_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
 }
 
 fn parse_fix_loop_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
-    let mut model = String::from("gpt-5.4");
-    let mut reasoning_effort = ReasoningEffort::High;
+    let mut model = String::from(DEFAULT_MODEL);
+    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut verbose = false;
     let mut input_kind: Option<ReviewSubject> = None;
     let mut artifact_path: Option<PathBuf> = None;
@@ -691,7 +691,7 @@ fn print_help() {
   cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]
 
 Exemples:
-  cargo run -q -p app -- --model gpt-5.4 --reasoning high
+  cargo run -q -p app -- --model gpt-5.4 --reasoning low
   cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low \"Explique ce depot\"
   cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low \"Explique ce depot\"
   cargo run -q -p app -- audit
@@ -1065,6 +1065,7 @@ fn save_audit_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codex::ReasoningEffort;
 
     fn normalize_path(path: &Path) -> String {
         path.display().to_string().replace("\\\\?\\", "")
@@ -1078,6 +1079,17 @@ mod tests {
         parse_args(&args)
     }
 
+    fn request_for(command: &CliCommand) -> &CodexRequest {
+        match command {
+            CliCommand::Run(request) => request,
+            CliCommand::Audit(command) => &command.request,
+            CliCommand::Plan(command) => &command.request,
+            CliCommand::ImplementationAudit(command) => &command.request,
+            CliCommand::Review(command) => &command.request,
+            CliCommand::FixLoop(command) => &command.request,
+        }
+    }
+
     #[test]
     fn parses_defaults() {
         let command = parse(&[]).expect("la configuration par defaut doit etre valide");
@@ -1086,8 +1098,8 @@ mod tests {
             panic!("la commande par defaut doit etre le mode run");
         };
 
-        assert_eq!(request.model, "gpt-5.4");
-        assert_eq!(request.reasoning_effort, ReasoningEffort::Medium);
+        assert_eq!(request.model, DEFAULT_MODEL);
+        assert_eq!(request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(request.mode, CodexMode::Interactive);
         assert_eq!(request.prompt, None);
         assert!(!request.verbose);
@@ -1117,6 +1129,56 @@ mod tests {
         assert_eq!(request.mode, CodexMode::Exec);
         assert_eq!(request.prompt.as_deref(), Some("Analyse ce repo"));
         assert!(!request.verbose);
+    }
+
+    #[test]
+    fn codex_commands_accept_model_and_reasoning_overrides() {
+        let cases: &[&[&str]] = &[
+            &["--model", "gpt-5.6", "--reasoning", "medium"],
+            &["audit", "--model", "gpt-5.6", "--reasoning", "medium"],
+            &[
+                "plan",
+                "Cargo.toml",
+                "--model",
+                "gpt-5.6",
+                "--reasoning",
+                "medium",
+            ],
+            &[
+                "implementation-audit",
+                "Cargo.toml",
+                "--model",
+                "gpt-5.6",
+                "--reasoning",
+                "medium",
+            ],
+            &[
+                "review",
+                "audit",
+                "Cargo.toml",
+                "--model",
+                "gpt-5.6",
+                "--reasoning",
+                "medium",
+            ],
+            &[
+                "fix-loop",
+                "plan",
+                "Cargo.toml",
+                "--model",
+                "gpt-5.6",
+                "--reasoning",
+                "medium",
+            ],
+        ];
+
+        for case in cases {
+            let command = parse(case).expect("la commande doit accepter model et reasoning");
+            let request = request_for(&command);
+
+            assert_eq!(request.model, "gpt-5.6");
+            assert_eq!(request.reasoning_effort, ReasoningEffort::Medium);
+        }
     }
 
     #[test]
@@ -1165,7 +1227,8 @@ mod tests {
         };
 
         assert_eq!(audit.request.mode, CodexMode::Exec);
-        assert_eq!(audit.request.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(audit.request.model, DEFAULT_MODEL);
+        assert_eq!(audit.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert!(audit.request.verbose);
         assert_eq!(
             normalize_path(&audit.target_dir),
@@ -1231,7 +1294,8 @@ mod tests {
         };
 
         assert_eq!(plan.request.mode, CodexMode::Exec);
-        assert_eq!(plan.request.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(plan.request.model, DEFAULT_MODEL);
+        assert_eq!(plan.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert!(plan.output_dir.ends_with(".plan"));
         assert_eq!(plan.timeout, Duration::from_secs(900));
         assert!(plan.request.prompt.as_deref().is_some_and(|prompt| {
@@ -1251,7 +1315,8 @@ mod tests {
         };
 
         assert_eq!(audit.request.mode, CodexMode::Exec);
-        assert_eq!(audit.request.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(audit.request.model, DEFAULT_MODEL);
+        assert_eq!(audit.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert!(audit.output_dir.ends_with(".audit"));
         assert_eq!(audit.timeout, Duration::from_secs(900));
         assert!(audit.implementation_path.is_none());
@@ -1307,7 +1372,8 @@ mod tests {
         };
 
         assert_eq!(review.request.mode, CodexMode::Exec);
-        assert_eq!(review.request.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(review.request.model, DEFAULT_MODEL);
+        assert_eq!(review.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(review.subject, ReviewSubject::Implementation);
         assert!(review.output_dir.ends_with(".review"));
         assert_eq!(review.timeout, Duration::from_secs(900));
@@ -1351,7 +1417,8 @@ mod tests {
         };
 
         assert_eq!(fix_loop.request.mode, CodexMode::Exec);
-        assert_eq!(fix_loop.request.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(fix_loop.request.model, DEFAULT_MODEL);
+        assert_eq!(fix_loop.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(fix_loop.input_kind, ReviewSubject::Plan);
         assert!(fix_loop.output_dir.ends_with(".fix-loop"));
         assert_eq!(fix_loop.timeout, Duration::from_secs(1800));

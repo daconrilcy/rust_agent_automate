@@ -436,8 +436,11 @@ mod tests {
     fn parses_default_refactor_workflow() {
         let workflow = default_refactor_workflow();
 
-        assert_eq!(workflow.steps.len(), 6);
+        assert_eq!(workflow.steps.len(), 7);
         assert_eq!(workflow.steps[0].name, "audit");
+        assert_eq!(workflow.steps[1].name, "plan");
+        assert_eq!(workflow.steps[2].name, "implementation");
+        assert_eq!(workflow.steps[3].name, "dev_review_corrections");
         assert_eq!(
             workflow
                 .loop_policy

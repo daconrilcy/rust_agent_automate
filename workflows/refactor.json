@@ -2,28 +2,39 @@
   "defaults": {
     "model": null,
     "reasoning": null,
-    "timeout_seconds": 1800
+    "timeout_seconds": 3600
   },
   "steps": [
     {
       "name": "audit",
       "rust_command": ["audit", "--target", "{target}"],
-      "model": null,
-      "reasoning": null,
+      "model": "GPT-5.4",
+      "reasoning": "medium",
       "fresh_codex_call": true
     },
     {
       "name": "plan",
       "rust_command": ["plan", "{artifact:audit}"],
-      "model": null,
-      "reasoning": null,
+      "model": "GPT-5.4",
+      "reasoning": "medium",
       "fresh_codex_call": true
     },
     {
+      "name": "implementation",
+      "rust_command": [
+        "--mode",
+        "exec",
+        "Use $rust-dev-solid to implement the refactoring plan at {artifact:plan} for {target}. Initial prompt: {initial_prompt}. Apply the scoped Rust changes, preserve unrelated user changes, and run the relevant verification commands before finishing."
+      ],
+      "model": "GPT-5.4",
+      "reasoning": "low",
+      "fresh_codex_call": false
+    },
+    {
       "name": "dev_review_corrections",
-      "rust_command": ["fix-loop", "plan", "{artifact:plan}"],
-      "model": null,
-      "reasoning": null,
+      "rust_command": ["fix-loop", "implementation", "{target}"],
+      "model": "GPT-5.4",
+      "reasoning": "medium",
       "fresh_codex_call": false
     },
     {
@@ -47,8 +58,8 @@
         "exec",
         "Commit and push the refactoring work for {target}. Initial prompt: {initial_prompt}. Use a concise commit message, preserve unrelated user changes, and report any push blocker."
       ],
-      "model": null,
-      "reasoning": null,
+      "model": "GPT-5.4-mini",
+      "reasoning": "low",
       "fresh_codex_call": false
     }
   ],

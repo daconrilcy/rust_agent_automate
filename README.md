@@ -74,7 +74,7 @@ Champs d'etape:
 
 Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`.
 
-`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, dev par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter si l'audit d'alignement ne contient pas de marqueur de sortie propre.
+`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter si l'audit d'alignement ne contient pas de marqueur de sortie propre.
 
 ## Exemples
 

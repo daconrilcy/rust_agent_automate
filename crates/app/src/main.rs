@@ -8,6 +8,7 @@ mod implementation_audit;
 mod plan;
 mod reporting;
 mod review;
+mod service_paths;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use fix_loop::FixLoopCommand;
 use implementation_audit::ImplementationAuditCommand;
 use plan::PlanCommand;
-use review::{ReviewCommand, ReviewSubject};
+use review::ReviewCommand;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -392,6 +393,7 @@ pub(crate) fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
 mod tests {
     use super::*;
     use crate::codex::ReasoningEffort;
+    use crate::review::ReviewSubject;
 
     fn normalize_path(path: &Path) -> String {
         std::fs::canonicalize(path)

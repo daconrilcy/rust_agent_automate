@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -6,6 +5,7 @@ use std::time::Duration;
 use crate::artifact;
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::reporting::{self, ReportSpec};
+use crate::service_paths::{self, PathRequirement};
 use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -18,34 +18,8 @@ pub struct PlanCommand {
 }
 
 pub fn resolve_audit_file(path: PathBuf) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))?
-            .join(path)
-    };
-
-    let metadata = fs::metadata(&path).map_err(|error| {
-        format!(
-            "impossible d'acceder au fichier d'audit {}: {error}",
-            path.display()
-        )
-    })?;
-
-    if !metadata.is_file() {
-        return Err(format!(
-            "le chemin d'audit doit etre un fichier: {}",
-            path.display()
-        ));
-    }
-
-    fs::canonicalize(&path).map_err(|error| {
-        format!(
-            "impossible de resoudre le fichier d'audit {}: {error}",
-            path.display()
-        )
-    })
+    service_paths::resolve_existing_path(path, "audit", PathRequirement::File)
+        .map_err(|error| error.replace("le chemin audit", "le chemin d'audit"))
 }
 
 pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path) -> String {
@@ -158,9 +132,7 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         }
     }
 
-    let workspace_root = std::env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
+    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
     let audit_path = resolve_audit_file(audit_path.ok_or_else(|| {
         ParseOutcome::Error(
             "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
@@ -168,7 +140,7 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         )
     })?)
     .map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".plan"));
+    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".plan");
     let prompt = build_prompt(&workspace_root, &audit_path, &output_dir);
 
     Ok(PlanCommand {
@@ -207,5 +179,13 @@ mod tests {
         assert!(prompt.contains("C:\\dev\\rust_agent"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.plan"));
         assert!(prompt.contains("complete Markdown implementation handoff plan only"));
+    }
+
+    #[test]
+    fn resolve_audit_file_rejects_directory() {
+        let error =
+            resolve_audit_file(std::env::temp_dir()).expect_err("un audit doit etre un fichier");
+
+        assert!(error.contains("le chemin d'audit doit etre un fichier"));
     }
 }

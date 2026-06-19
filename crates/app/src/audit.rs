@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -6,6 +5,7 @@ use std::time::Duration;
 use crate::artifact;
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::reporting::{self, ReportSpec};
+use crate::service_paths::{self, PathRequirement};
 use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -42,34 +42,8 @@ pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path)
 }
 
 pub fn resolve_target_dir(path: PathBuf) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))?
-            .join(path)
-    };
-
-    let metadata = fs::metadata(&path).map_err(|error| {
-        format!(
-            "impossible d'acceder au dossier cible {}: {error}",
-            path.display()
-        )
-    })?;
-
-    if !metadata.is_dir() {
-        return Err(format!(
-            "le chemin cible doit etre un dossier: {}",
-            path.display()
-        ));
-    }
-
-    fs::canonicalize(&path).map_err(|error| {
-        format!(
-            "impossible de resoudre le dossier cible {}: {error}",
-            path.display()
-        )
-    })
+    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory)
+        .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
 }
 
 pub fn run(command: &AuditCommand) {
@@ -155,12 +129,10 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         }
     }
 
-    let workspace_root = std::env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
+    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
     let target_dir = resolve_target_dir(target_dir.unwrap_or_else(|| workspace_root.clone()))
         .map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".audit"));
+    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".audit");
     let prompt = build_prompt(&workspace_root, &target_dir, &output_dir);
 
     Ok(AuditCommand {
@@ -177,4 +149,17 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         output_dir,
         timeout,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_target_dir_rejects_file() {
+        let error = resolve_target_dir(PathBuf::from("Cargo.toml"))
+            .expect_err("audit doit exiger un dossier");
+
+        assert!(error.contains("le chemin cible doit etre un dossier"));
+    }
 }

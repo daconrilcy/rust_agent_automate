@@ -6,6 +6,7 @@ use crate::artifact;
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::reporting::{self, ReportSpec};
 use crate::review::{self, ReviewSubject};
+use crate::service_paths;
 use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -169,12 +170,10 @@ pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
                 .to_string(),
         )
     })?;
-    let workspace_root = std::env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
+    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
     let artifact_path =
         resolve_artifact_path(input_kind, artifact_path).map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".fix-loop"));
+    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".fix-loop");
     let prompt = build_prompt(&workspace_root, input_kind, &artifact_path, &output_dir);
 
     Ok(FixLoopCommand {

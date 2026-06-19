@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -6,6 +5,7 @@ use std::time::Duration;
 use crate::artifact;
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::reporting::{self, ReportSpec};
+use crate::service_paths::{self, PathRequirement};
 use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,45 +73,26 @@ pub struct ReviewCommand {
 }
 
 pub fn resolve_artifact_path(subject: ReviewSubject, path: PathBuf) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))?
-            .join(path)
-    };
-
-    let metadata = fs::metadata(&path).map_err(|error| {
-        format!(
-            "impossible d'acceder a l'artefact {} {}: {error}",
-            subject,
-            path.display()
-        )
-    })?;
+    let path = service_paths::resolve_existing_path(
+        path,
+        &format!("de review {subject}"),
+        match subject {
+            ReviewSubject::Plan | ReviewSubject::Audit => PathRequirement::File,
+            ReviewSubject::Implementation => PathRequirement::FileOrDirectory,
+        },
+    )?;
 
     match subject {
-        ReviewSubject::Plan | ReviewSubject::Audit if !metadata.is_file() => {
-            return Err(format!(
-                "le chemin de review {subject} doit etre un fichier: {}",
-                path.display()
-            ));
-        }
-        ReviewSubject::Implementation if !metadata.is_file() && !metadata.is_dir() => {
-            return Err(format!(
-                "le chemin de review implementation doit etre un fichier ou un dossier: {}",
-                path.display()
-            ));
-        }
-        _ => {}
-    }
-
-    fs::canonicalize(&path).map_err(|error| {
-        format!(
-            "impossible de resoudre l'artefact {} {}: {error}",
-            subject,
+        ReviewSubject::Plan | ReviewSubject::Audit if !path.is_file() => Err(format!(
+            "le chemin de review {subject} doit etre un fichier: {}",
             path.display()
-        )
-    })
+        )),
+        ReviewSubject::Implementation if !path.is_file() && !path.is_dir() => Err(format!(
+            "le chemin de review implementation doit etre un fichier ou un dossier: {}",
+            path.display()
+        )),
+        _ => Ok(path),
+    }
 }
 
 pub fn build_prompt(
@@ -260,12 +241,10 @@ pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
                 .to_string(),
         )
     })?;
-    let workspace_root = std::env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
+    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
     let artifact_path =
         resolve_artifact_path(subject, artifact_path).map_err(ParseOutcome::Error)?;
-    let output_dir = output_dir.unwrap_or_else(|| workspace_root.join(".review"));
+    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".review");
     let prompt = build_prompt(&workspace_root, subject, &artifact_path, &output_dir);
 
     Ok(ReviewCommand {

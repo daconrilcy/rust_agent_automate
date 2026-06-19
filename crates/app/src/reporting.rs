@@ -29,79 +29,141 @@ pub struct ReportSpec<'a> {
     pub clean_detector: Option<fn(&str) -> bool>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ReportFailure {
+    CodexCall(String),
+    MissingFinalMessage {
+        status_code: i32,
+        stdout: String,
+        stderr: String,
+    },
+    Save {
+        message: String,
+        clean: Option<bool>,
+        error: String,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CompletedReport {
+    status_code: i32,
+    stdout: String,
+    stderr: String,
+    message: String,
+    saved_path: PathBuf,
+    outcome: CommandOutcome,
+}
+
 pub fn run_codex_report(request: &CodexRequest, timeout: Duration, spec: ReportSpec<'_>) {
-    match codex::run_until_final_message(request, timeout) {
-        Ok(result) => {
-            let Some(message) = result.final_message else {
-                let outcome = CommandOutcome {
-                    command_name: spec.command_name.to_string(),
-                    status_code: result.status.code(),
-                    final_message_present: false,
-                    artifact_path: None,
-                    clean: None,
-                };
-                let _ = write_command_outcome_if_requested(&outcome);
+    let outcome = codex::run_until_final_message(request, timeout)
+        .map_err(|error| ReportFailure::CodexCall(error.to_string()))
+        .and_then(|result| finalize_report(result, &spec));
 
-                if !result.status.success() {
-                    print_failure_details(&result.stdout, &result.stderr);
-                    process::exit(result.status.code().unwrap_or(1));
-                }
-
-                eprintln!(
-                    "codex n'a pas retourne de message final pour {}",
-                    spec.missing_message_label
-                );
-                process::exit(1);
-            };
-
-            if !result.status.success() {
+    match outcome {
+        Ok(report) => {
+            if report.status_code != 0 {
                 eprintln!(
                     "codex a produit un {} mais s'est termine avec le statut {}. Le {} est conserve.",
-                    spec.final_label, result.status, spec.saved_label
+                    spec.final_label, report.status_code, spec.saved_label
                 );
-                print_failure_details(&result.stdout, &result.stderr);
+                print_failure_details(&report.stdout, &report.stderr);
             }
 
-            match (spec.save)(spec.output_dir, &message) {
-                Ok(path) => {
-                    let outcome = CommandOutcome {
-                        command_name: spec.command_name.to_string(),
-                        status_code: result.status.code(),
-                        final_message_present: true,
-                        artifact_path: Some(path.clone()),
-                        clean: spec.clean_detector.map(|detector| detector(&message)),
-                    };
-                    let _ = write_command_outcome_if_requested(&outcome);
-
-                    println!(
-                        "{} enregistre dans {}",
-                        capitalize(spec.saved_label),
-                        path.display()
-                    );
-                    println!();
-                    println!("{message}");
-                }
-                Err(error) => {
-                    let outcome = CommandOutcome {
-                        command_name: spec.command_name.to_string(),
-                        status_code: result.status.code(),
-                        final_message_present: true,
-                        artifact_path: None,
-                        clean: spec.clean_detector.map(|detector| detector(&message)),
-                    };
-                    let _ = write_command_outcome_if_requested(&outcome);
-
-                    eprintln!(
-                        "echec lors de l'enregistrement du {}: {error}",
-                        spec.saved_label
-                    );
-                    process::exit(1);
-                }
-            }
+            println!(
+                "{} enregistre dans {}",
+                capitalize(spec.saved_label),
+                report.saved_path.display()
+            );
+            println!();
+            println!("{}", report.message);
         }
-        Err(error) => {
+        Err(ReportFailure::CodexCall(error)) => {
             eprintln!("echec lors de l'appel a codex: {error}");
             process::exit(1);
+        }
+        Err(ReportFailure::MissingFinalMessage {
+            status_code,
+            stdout,
+            stderr,
+        }) => {
+            if status_code != 0 {
+                print_failure_details(&stdout, &stderr);
+                process::exit(status_code);
+            }
+
+            eprintln!(
+                "codex n'a pas retourne de message final pour {}",
+                spec.missing_message_label
+            );
+            process::exit(1);
+        }
+        Err(ReportFailure::Save { error, .. }) => {
+            eprintln!(
+                "echec lors de l'enregistrement du {}: {error}",
+                spec.saved_label
+            );
+            process::exit(1);
+        }
+    }
+}
+
+fn finalize_report(
+    result: codex::RunResult,
+    spec: &ReportSpec<'_>,
+) -> Result<CompletedReport, ReportFailure> {
+    let Some(message) = result.final_message else {
+        let outcome = CommandOutcome {
+            command_name: spec.command_name.to_string(),
+            status_code: result.status.code(),
+            final_message_present: false,
+            artifact_path: None,
+            clean: None,
+        };
+        let _ = write_command_outcome_if_requested(&outcome);
+
+        return Err(ReportFailure::MissingFinalMessage {
+            status_code: result.status.code().unwrap_or(1),
+            stdout: result.stdout,
+            stderr: result.stderr,
+        });
+    };
+
+    let clean = spec.clean_detector.map(|detector| detector(&message));
+    match (spec.save)(spec.output_dir, &message) {
+        Ok(path) => {
+            let outcome = CommandOutcome {
+                command_name: spec.command_name.to_string(),
+                status_code: result.status.code(),
+                final_message_present: true,
+                artifact_path: Some(path.clone()),
+                clean,
+            };
+            let _ = write_command_outcome_if_requested(&outcome);
+
+            Ok(CompletedReport {
+                status_code: result.status.code().unwrap_or(1),
+                stdout: result.stdout,
+                stderr: result.stderr,
+                message,
+                saved_path: path,
+                outcome,
+            })
+        }
+        Err(error) => {
+            let outcome = CommandOutcome {
+                command_name: spec.command_name.to_string(),
+                status_code: result.status.code(),
+                final_message_present: true,
+                artifact_path: None,
+                clean,
+            };
+            let _ = write_command_outcome_if_requested(&outcome);
+
+            Err(ReportFailure::Save {
+                message,
+                clean,
+                error: error.to_string(),
+            })
         }
     }
 }
@@ -111,6 +173,10 @@ pub fn write_command_outcome_if_requested(outcome: &CommandOutcome) -> io::Resul
         return Ok(());
     };
 
+    write_command_outcome(&path, outcome)
+}
+
+fn write_command_outcome(path: &Path, outcome: &CommandOutcome) -> io::Result<()> {
     let content = serde_json::to_vec(outcome)
         .map_err(|error| io::Error::other(format!("serialisation du resultat: {error}")))?;
     fs::write(path, content)
@@ -147,6 +213,31 @@ fn capitalize(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codex::RunResult;
+    use std::os::windows::process::ExitStatusExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn save_test_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
+        crate::artifact::save_timestamped_markdown(output_dir, "implementation-audit", content)
+    }
+
+    fn report_spec<'a>(output_dir: &'a Path) -> ReportSpec<'a> {
+        ReportSpec {
+            command_name: "implementation-audit",
+            saved_label: "audit d'implementation",
+            final_label: "audit d'implementation",
+            missing_message_label: "audit d'implementation",
+            output_dir,
+            save: save_test_report,
+            clean_detector: Some(detect_clean_implementation_audit),
+        }
+    }
+
+    fn temp_test_dir(prefix: &str) -> PathBuf {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("rust_agent_{prefix}_{id}"))
+    }
 
     #[test]
     fn detects_clean_implementation_audit_summary_line() {
@@ -156,5 +247,132 @@ mod tests {
         assert!(!detect_clean_implementation_audit(
             "# Rust Implementation Plan Audit\n\n## Summary\n- 2 actionable deviations found.\n"
         ));
+    }
+
+    #[test]
+    fn writes_command_outcome_to_requested_path() {
+        let output_path = temp_test_dir("outcome").join("outcome.json");
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).expect("creation du dossier");
+        }
+
+        let outcome = CommandOutcome {
+            command_name: "audit".to_string(),
+            status_code: Some(0),
+            final_message_present: true,
+            artifact_path: Some(PathBuf::from("C:\\tmp\\audit.md")),
+            clean: Some(true),
+        };
+
+        write_command_outcome(&output_path, &outcome).expect("ecriture du resultat");
+
+        let saved = fs::read(&output_path).expect("lecture du resultat");
+        let decoded: CommandOutcome = serde_json::from_slice(&saved).expect("decodage JSON");
+        assert_eq!(decoded, outcome);
+        let _ = fs::remove_dir_all(output_path.parent().expect("dossier parent"));
+    }
+
+    #[test]
+    fn finalize_report_persists_message_and_marks_clean() {
+        let output_dir = temp_test_dir("report_success");
+        let report = finalize_report(
+            RunResult {
+                status: std::process::ExitStatus::from_raw(0),
+                final_message: Some(
+                    "# Rust Implementation Plan Audit\n\n## Deviations\nNo actionable deviations found.\n"
+                        .to_string(),
+                ),
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            &report_spec(&output_dir),
+        )
+        .expect("rapport finalise");
+
+        assert_eq!(report.status_code, 0);
+        assert_eq!(report.outcome.clean, Some(true));
+        assert_eq!(
+            report.outcome.artifact_path.as_ref(),
+            Some(&report.saved_path)
+        );
+        assert!(report.saved_path.is_file());
+
+        let _ = fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn finalize_report_preserves_non_zero_status_with_artifact() {
+        let output_dir = temp_test_dir("report_non_zero");
+        let report = finalize_report(
+            RunResult {
+                status: std::process::ExitStatus::from_raw(7),
+                final_message: Some("rapport".to_string()),
+                stdout: "stdout".to_string(),
+                stderr: "stderr".to_string(),
+            },
+            &report_spec(&output_dir),
+        )
+        .expect("rapport finalise");
+
+        assert_eq!(report.status_code, 7);
+        assert_eq!(report.outcome.status_code, Some(7));
+        assert!(report.saved_path.is_file());
+
+        let _ = fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn finalize_report_reports_missing_final_message() {
+        let error = finalize_report(
+            RunResult {
+                status: std::process::ExitStatus::from_raw(0),
+                final_message: None,
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            &report_spec(Path::new("C:\\tmp")),
+        )
+        .expect_err("absence de message final doit echouer");
+
+        assert_eq!(
+            error,
+            ReportFailure::MissingFinalMessage {
+                status_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn finalize_report_reports_save_failure_and_preserves_outcome_shape() {
+        let file_path = temp_test_dir("report_save_failure");
+        fs::write(&file_path, "occupied").expect("creation du fichier");
+
+        let error = finalize_report(
+            RunResult {
+                status: std::process::ExitStatus::from_raw(0),
+                final_message: Some("content".to_string()),
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            &report_spec(&file_path),
+        )
+        .expect_err("un chemin fichier doit faire echouer la sauvegarde");
+
+        match error {
+            ReportFailure::Save {
+                message,
+                clean,
+                error,
+            } => {
+                assert_eq!(message, "content");
+                assert_eq!(clean, Some(false));
+                assert!(!error.is_empty());
+            }
+            other => panic!("erreur inattendue: {other:?}"),
+        }
+
+        let _ = fs::remove_file(file_path);
     }
 }

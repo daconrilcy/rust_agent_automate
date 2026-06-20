@@ -28,12 +28,7 @@ fn workflow_chain_persists_and_reuses_artifacts() {
           "rust_command": ["plan", "{artifact:audit}"],
           "fresh_codex_call": true
         }
-      ],
-      "loop_policy": {
-        "audit_step": "audit",
-        "max_cycles": 1,
-        "clean_markers": ["fake final message"]
-      }
+      ]
     }"#;
     fs::write(&workflow_path, workflow).expect("ecriture du workflow");
 
@@ -101,12 +96,7 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
           "rust_command": ["plan", "{artifact:audit}"],
           "fresh_codex_call": true
         }
-      ],
-      "loop_policy": {
-        "audit_step": "audit",
-        "max_cycles": 1,
-        "clean_markers": ["fake final message"]
-      }
+      ]
     }"#;
     fs::write(&workflow_path, workflow).expect("ecriture du workflow");
 

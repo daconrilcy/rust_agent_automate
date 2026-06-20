@@ -1,22 +1,9 @@
-mod artifact;
-mod audit;
-mod automate;
-mod cli;
-mod codex;
-mod command_registry;
-mod fix_loop;
-mod implementation_audit;
-mod plan;
-mod reporting;
-mod review;
-mod service_command;
-mod service_paths;
-
 use std::process;
 
-use automate::AutomateCommand;
-use cli::CliCommand;
-use codex::CodexRequest;
+use app::automate::{self, AutomateCommand};
+use app::cli::{self, CliCommand};
+use app::codex::{self, CodexRequest};
+use app::{audit, fix_loop, implementation_audit, plan, review};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use crate::codex::{self, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
 use crate::command_registry;
 use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome};
 
@@ -202,22 +202,16 @@ where
                 step.name
             );
             let output = run_step(workflow, step, &context)?;
-            let artifact_path = output
-                .command_outcome
-                .as_ref()
-                .and_then(|outcome| outcome.artifact_path.clone())
-                .or_else(|| extract_artifact_path(&output.stdout));
+            let command_outcome = command_outcome_for_step(workflow, step, &context, &output)?;
+
+            let artifact_path = command_outcome.artifact_path;
             if let Some(path) = &artifact_path {
                 context
                     .artifacts_by_step
                     .insert(step.name.clone(), path.clone());
                 context.last_artifact = Some(path.clone());
             }
-            if let Some(clean) = output
-                .command_outcome
-                .as_ref()
-                .and_then(|outcome| outcome.clean)
-            {
+            if let Some(clean) = command_outcome.clean {
                 context.clean_by_step.insert(step.name.clone(), clean);
             }
             context.last_output = output.stdout.clone();
@@ -225,7 +219,7 @@ where
             report.step_results.push(StepResult {
                 cycle,
                 name: step.name.clone(),
-                status_code: output.status_code,
+                status_code: command_outcome.status_code,
                 artifact_path,
             });
 
@@ -233,7 +227,7 @@ where
                 return Err(io::Error::other(format!(
                     "l'etape automate '{}' a echoue avec le statut {}{}{}",
                     step.name,
-                    format_status_code(output.status_code),
+                    format_status_code(command_outcome.status_code),
                     format_stream("stdout", &output.stdout),
                     format_stream("stderr", &output.stderr)
                 )));
@@ -306,7 +300,7 @@ fn run_step(
     let command_outcome = read_command_outcome(&outcome_path)?;
 
     Ok(StepExecution {
-        status_code: output.status.code(),
+        status_code: normalized_status_code(output.status.code()),
         success: output.status.success(),
         stdout,
         stderr,
@@ -380,6 +374,38 @@ fn command_is_direct_run(args: &[String]) -> bool {
     command_registry::is_direct_run(args.first().map(String::as_str))
 }
 
+fn command_outcome_for_step(
+    workflow: &Workflow,
+    step: &WorkflowStep,
+    context: &RunContext,
+    output: &StepExecution,
+) -> io::Result<CommandOutcome> {
+    if let Some(outcome) = &output.command_outcome {
+        let mut outcome = outcome.clone();
+        outcome.status_code = normalized_status_code(outcome.status_code);
+        return Ok(outcome);
+    }
+
+    if command_is_direct_run(&resolve_step_args(workflow, step, context)) {
+        return Ok(CommandOutcome {
+            command_name: step.name.clone(),
+            status_code: normalized_status_code(output.status_code),
+            final_message_present: !output.stdout.trim().is_empty(),
+            artifact_path: None,
+            clean: None,
+        });
+    }
+
+    Err(io::Error::other(format!(
+        "l'etape automate '{}' doit produire un resultat structure",
+        step.name
+    )))
+}
+
+fn normalized_status_code(status_code: Option<i32>) -> Option<i32> {
+    status_code.map(|code| codex::process_exit_code(Some(code)))
+}
+
 fn expand_placeholders(value: &str, context: &RunContext) -> String {
     let mut expanded = value
         .replace("{initial_prompt}", &context.initial_prompt)
@@ -396,15 +422,6 @@ fn expand_placeholders(value: &str, context: &RunContext) -> String {
     }
 
     expanded
-}
-
-fn extract_artifact_path(stdout: &str) -> Option<PathBuf> {
-    stdout
-        .lines()
-        .find_map(|line| line.split_once(" enregistre dans ").map(|(_, path)| path))
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
 }
 
 fn is_clean(policy: &LoopPolicy, context: &RunContext) -> bool {
@@ -551,12 +568,14 @@ mod tests {
     }
 
     #[test]
-    fn extracts_artifact_path_from_command_output() {
-        let output = "Plan enregistre dans C:\\dev\\rust_agent\\.plan\\plan-1.md\n\n# Plan";
+    fn read_command_outcome_rejects_invalid_json() {
+        let path = temp_outcome_file_path();
+        fs::write(&path, b"{ invalid json").expect("ecriture du resultat invalide");
 
-        let path = extract_artifact_path(output).expect("artefact attendu");
+        let error = read_command_outcome(&path).expect_err("le JSON invalide doit echouer");
 
-        assert_eq!(path, PathBuf::from("C:\\dev\\rust_agent\\.plan\\plan-1.md"));
+        assert!(error.to_string().contains("resultat structure invalide"));
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -781,6 +800,36 @@ mod tests {
     }
 
     #[test]
+    fn run_workflow_rejects_missing_structured_outcome() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let error = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "Plan enregistre dans C:\\repo\\.audit\\audit.md".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect_err("un resultat structure est requis");
+
+        assert!(
+            error
+                .to_string()
+                .contains("doit produire un resultat structure")
+        );
+    }
+
+    #[test]
     fn run_workflow_stops_on_failed_step_with_context() {
         let workflow = parse_workflow(
             r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
@@ -797,7 +846,13 @@ mod tests {
                     success: false,
                     stdout: "sortie".to_string(),
                     stderr: "erreur".to_string(),
-                    command_outcome: None,
+                    command_outcome: Some(CommandOutcome {
+                        command_name: "audit".to_string(),
+                        status_code: Some(17),
+                        final_message_present: false,
+                        artifact_path: None,
+                        clean: None,
+                    }),
                 })
             },
         )
@@ -810,6 +865,60 @@ mod tests {
         );
         assert!(error.to_string().contains("stdout:\nsortie"));
         assert!(error.to_string().contains("stderr:\nerreur"));
+    }
+
+    #[test]
+    fn run_workflow_accepts_direct_run_without_structured_outcome() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"implementation","rust_command":["--mode","exec","Implement"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "implementation terminee".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect("une etape directe n'a pas d'artefact structure");
+
+        assert_eq!(report.completed_cycles, 1);
+        assert_eq!(report.step_results[0].status_code, Some(0));
+        assert_eq!(report.step_results[0].artifact_path, None);
+    }
+
+    #[test]
+    fn run_workflow_normalizes_non_portable_status_codes() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"implementation","rust_command":["--mode","exec","Implement"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(-1),
+                    success: true,
+                    stdout: "implementation terminee".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect("workflow execute");
+
+        assert_eq!(report.step_results[0].status_code, Some(1));
     }
 
     #[test]

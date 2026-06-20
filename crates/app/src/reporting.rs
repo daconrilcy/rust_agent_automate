@@ -88,7 +88,7 @@ pub fn run_codex_report(request: &CodexRequest, timeout: Duration, spec: ReportS
         }) => {
             if status_code != 0 {
                 print_failure_details(&stdout, &stderr);
-                process::exit(status_code);
+                process::exit(codex::process_exit_code(Some(status_code)));
             }
 
             eprintln!(

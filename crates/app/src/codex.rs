@@ -122,6 +122,13 @@ pub struct RunResult {
     pub stderr: String,
 }
 
+pub fn process_exit_code(status_code: Option<i32>) -> i32 {
+    match status_code {
+        Some(code @ 0..=255) => code,
+        _ => 1,
+    }
+}
+
 pub fn run(request: &CodexRequest) -> io::Result<RunResult> {
     let executable = resolve_codex_executable()?;
     let inside_git_repository = is_inside_git_repository()?;
@@ -787,6 +794,15 @@ mod tests {
     }
 
     #[test]
+    fn process_exit_code_maps_non_portable_child_statuses_to_generic_failure() {
+        assert_eq!(process_exit_code(Some(0)), 0);
+        assert_eq!(process_exit_code(Some(7)), 7);
+        assert_eq!(process_exit_code(Some(-1)), 1);
+        assert_eq!(process_exit_code(Some(256)), 1);
+        assert_eq!(process_exit_code(None), 1);
+    }
+
+    #[test]
     fn read_final_message_returns_none_for_missing_file() {
         let missing = std::env::temp_dir().join(format!(
             "rust_agent_missing_{}.txt",
@@ -879,9 +895,7 @@ mod tests {
         .expect("le PATH doit etre pris en compte");
 
         assert_eq!(
-            resolved
-                .to_string_lossy()
-                .to_ascii_lowercase(),
+            resolved.to_string_lossy().to_ascii_lowercase(),
             executable.to_string_lossy().to_ascii_lowercase()
         );
 

@@ -302,7 +302,7 @@ fn run_request(request: &CodexRequest) {
                 } else if !stdout.is_empty() {
                     eprintln!("{stdout}");
                 }
-                process::exit(result.status.code().unwrap_or(1));
+                process::exit(codex::process_exit_code(result.status.code()));
             }
         }
         Err(error) => {

@@ -275,6 +275,17 @@ fn parses_verbose_flag() {
 }
 
 #[test]
+fn rejects_duplicate_run_model_option() {
+    let error = parse(&["--model", "gpt-5.4", "--model", "gpt-5.5"])
+        .expect_err("run ne doit pas accepter deux modeles");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
+    );
+}
+
+#[test]
 fn parses_refactor_automate_with_default_workflow() {
     let command = parse(&["refactor-automate", "--target", ".", "Durcir", "le", "code"])
         .expect("refactor-automate parse");
@@ -314,6 +325,35 @@ fn rejects_automate_without_workflow() {
             "la commande automate requiert un workflow JSON. Exemple: cargo run -p app -- automate workflow.json \"Objectif\""
                 .to_string()
         )
+    );
+}
+
+#[test]
+fn rejects_duplicate_automate_workflow_option() {
+    let error = parse(&["automate", "--workflow", "a.json", "--workflow", "b.json"])
+        .expect_err("automate ne doit pas accepter deux workflows nommes");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("le workflow automate a deja ete fourni".to_string())
+    );
+}
+
+#[test]
+fn rejects_duplicate_refactor_automate_target_option() {
+    let error = parse(&[
+        "refactor-automate",
+        "--target",
+        ".",
+        "--target",
+        ".",
+        "Durcir",
+    ])
+    .expect_err("refactor-automate ne doit pas accepter deux cibles");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("la cible de refactor-automate a deja ete fournie".to_string())
     );
 }
 

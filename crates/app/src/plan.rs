@@ -27,6 +27,10 @@ const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescrip
     clean_detector: None,
 };
 
+pub fn descriptor() -> ServiceCommandDescriptor<'static> {
+    PLAN_DESCRIPTOR
+}
+
 pub fn resolve_audit_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
@@ -55,27 +59,6 @@ pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path)
 
 pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     service_command::save_markdown_artifact(output_dir, PLAN_DESCRIPTOR, content)
-}
-
-pub fn run(
-    command: &PlanCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command(
-        &command.service,
-        PLAN_DESCRIPTOR,
-        format!(
-            "Plan Codex en cours depuis {} (timeout: {} secondes)...",
-            command.audit_path.display(),
-            command.service.timeout.as_secs()
-        ),
-        save_plan,
-    )
-}
-
-pub fn run_silently(
-    command: &PlanCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(&command.service, PLAN_DESCRIPTOR, save_plan)
 }
 
 #[allow(dead_code)]

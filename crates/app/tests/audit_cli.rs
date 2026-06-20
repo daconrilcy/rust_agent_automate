@@ -118,3 +118,14 @@ fn rejects_positional_argument_for_audit() {
         app::ParseOutcome::Error("argument inattendu pour audit: foo".to_string())
     );
 }
+
+#[test]
+fn rejects_duplicate_audit_model_option() {
+    let error = parse(&["audit", "--model", "gpt-5.4", "--model", "gpt-5.5"])
+        .expect_err("audit ne doit pas accepter deux modeles");
+
+    assert_eq!(
+        error,
+        app::ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
+    );
+}

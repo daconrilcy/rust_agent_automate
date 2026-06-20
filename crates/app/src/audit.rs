@@ -27,6 +27,10 @@ const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescri
     clean_detector: None,
 };
 
+pub fn descriptor() -> ServiceCommandDescriptor<'static> {
+    AUDIT_DESCRIPTOR
+}
+
 pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path) -> String {
     render_structured_prompt(
         &format!(
@@ -59,31 +63,6 @@ pub fn resolve_target_dir(
 ) -> Result<PathBuf, String> {
     service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
         .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
-}
-
-pub fn run(
-    command: &AuditCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command(
-        &command.service,
-        AUDIT_DESCRIPTOR,
-        format!(
-            "Audit Codex en cours sur {} (timeout: {} secondes)...",
-            command.target_dir.display(),
-            command.service.timeout.as_secs()
-        ),
-        save_report,
-    )
-}
-
-pub fn run_silently(
-    command: &AuditCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(
-        &command.service,
-        AUDIT_DESCRIPTOR,
-        save_report,
-    )
 }
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {

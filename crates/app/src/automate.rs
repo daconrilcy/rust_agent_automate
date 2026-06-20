@@ -15,7 +15,7 @@ mod workflow_runner;
 
 use std::path::PathBuf;
 
-use crate::cli::{ParseOutcome, next_value};
+use crate::cli::{ParseLoopControl, ParseOutcome, next_value, scan_args};
 use crate::service_paths;
 
 #[allow(unused_imports)]
@@ -31,35 +31,41 @@ pub use workflow_runner::run_workflow;
 pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
     let mut workflow_path: Option<PathBuf> = None;
     let mut prompt_parts: Vec<String> = Vec::new();
+    let mut named_workflow = false;
 
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--workflow" => {
-                let value = next_value(args, index, "--workflow")?;
-                if workflow_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le workflow automate a deja ete fourni".to_string(),
-                    ));
-                }
+    let prompt_start = scan_args(args, |index, value| match value {
+        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "--workflow" => {
+            if named_workflow {
+                return Err(ParseOutcome::Error(
+                    "le workflow automate a deja ete fourni".to_string(),
+                ));
+            }
+            named_workflow = true;
+            let value = next_value(args, index, "--workflow")?;
+            if workflow_path.is_some() {
+                return Err(ParseOutcome::Error(
+                    "le workflow automate a deja ete fourni".to_string(),
+                ));
+            }
+            workflow_path = Some(PathBuf::from(value));
+            Ok(ParseLoopControl::Continue(2))
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if workflow_path.is_none() {
                 workflow_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if workflow_path.is_none() {
-                    workflow_path = Some(PathBuf::from(value));
-                    index += 1;
-                    continue;
-                }
-
-                prompt_parts.extend_from_slice(&args[index..]);
-                break;
+                Ok(ParseLoopControl::Continue(1))
+            } else {
+                Ok(ParseLoopControl::CaptureRest)
             }
         }
+    })?;
+
+    if let Some(index) = prompt_start {
+        prompt_parts.extend_from_slice(&args[index..]);
     }
 
     let workflow_path = workflow_path.ok_or_else(|| {
@@ -90,29 +96,41 @@ pub fn parse_refactor_automate_args(
     let mut workflow_path: Option<PathBuf> = None;
     let mut target_dir: Option<PathBuf> = None;
     let mut prompt_parts: Vec<String> = Vec::new();
+    let mut seen_workflow = false;
+    let mut seen_target = false;
 
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--workflow" => {
-                let value = next_value(args, index, "--workflow")?;
-                workflow_path = Some(PathBuf::from(value));
-                index += 2;
+    let prompt_start = scan_args(args, |index, value| match value {
+        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "--workflow" => {
+            if seen_workflow {
+                return Err(ParseOutcome::Error(
+                    "le workflow de refactor-automate a deja ete fourni".to_string(),
+                ));
             }
-            "--target" => {
-                let value = next_value(args, index, "--target")?;
-                target_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            _ => {
-                prompt_parts.extend_from_slice(&args[index..]);
-                break;
-            }
+            seen_workflow = true;
+            let value = next_value(args, index, "--workflow")?;
+            workflow_path = Some(PathBuf::from(value));
+            Ok(ParseLoopControl::Continue(2))
         }
+        "--target" => {
+            if seen_target {
+                return Err(ParseOutcome::Error(
+                    "la cible de refactor-automate a deja ete fournie".to_string(),
+                ));
+            }
+            seen_target = true;
+            let value = next_value(args, index, "--target")?;
+            target_dir = Some(PathBuf::from(value));
+            Ok(ParseLoopControl::Continue(2))
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        _ => Ok(ParseLoopControl::CaptureRest),
+    })?;
+
+    if let Some(index) = prompt_start {
+        prompt_parts.extend_from_slice(&args[index..]);
     }
 
     let workflow = match workflow_path {

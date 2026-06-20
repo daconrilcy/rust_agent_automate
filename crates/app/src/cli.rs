@@ -19,6 +19,11 @@ pub enum ParseOutcome {
     Error(String),
 }
 
+pub enum ParseLoopControl {
+    Continue(usize),
+    CaptureRest,
+}
+
 impl CliCommand {
     pub fn execute(self) -> i32 {
         match self {
@@ -84,49 +89,91 @@ pub fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
     Ok(Duration::from_secs(seconds))
 }
 
+pub fn scan_args<F>(args: &[String], mut handler: F) -> Result<Option<usize>, ParseOutcome>
+where
+    F: FnMut(usize, &str) -> Result<ParseLoopControl, ParseOutcome>,
+{
+    let mut index = 0;
+    while index < args.len() {
+        match handler(index, args[index].as_str())? {
+            ParseLoopControl::Continue(consumed) => {
+                if consumed == 0 {
+                    return Err(ParseOutcome::Error(format!(
+                        "le parseur partage doit consommer au moins un argument: {}",
+                        args[index]
+                    )));
+                }
+                index += consumed;
+            }
+            ParseLoopControl::CaptureRest => return Ok(Some(index)),
+        }
+    }
+
+    Ok(None)
+}
+
 fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let mut model = String::from(DEFAULT_MODEL);
     let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
     let mut mode = CodexMode::Interactive;
     let mut verbose = false;
     let mut resume_last = false;
+    let mut seen_model = false;
+    let mut seen_reasoning = false;
+    let mut seen_mode = false;
     let mut prompt_parts: Vec<String> = Vec::new();
 
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
+    let prompt_start = scan_args(args, |index, value| match value {
+        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "--model" => {
+            if seen_model {
+                return Err(ParseOutcome::Error(
+                    "l'option --model a deja ete fournie".to_string(),
+                ));
             }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--mode" => {
-                let value = next_value(args, index, "--mode")?;
-                mode = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            _ => {
-                prompt_parts.extend_from_slice(&args[index..]);
-                break;
-            }
+            seen_model = true;
+            let value = next_value(args, index, "--model")?;
+            model = value.to_owned();
+            Ok(ParseLoopControl::Continue(2))
         }
+        "--reasoning" => {
+            if seen_reasoning {
+                return Err(ParseOutcome::Error(
+                    "l'option --reasoning a deja ete fournie".to_string(),
+                ));
+            }
+            seen_reasoning = true;
+            let value = next_value(args, index, "--reasoning")?;
+            reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--mode" => {
+            if seen_mode {
+                return Err(ParseOutcome::Error(
+                    "l'option --mode a deja ete fournie".to_string(),
+                ));
+            }
+            seen_mode = true;
+            let value = next_value(args, index, "--mode")?;
+            mode = value.parse().map_err(ParseOutcome::Error)?;
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--verbose" => {
+            verbose = true;
+            Ok(ParseLoopControl::Continue(1))
+        }
+        "--continue-codex" => {
+            resume_last = true;
+            Ok(ParseLoopControl::Continue(1))
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        _ => Ok(ParseLoopControl::CaptureRest),
+    })?;
+
+    if let Some(index) = prompt_start {
+        prompt_parts.extend_from_slice(&args[index..]);
     }
 
     let prompt = if prompt_parts.is_empty() {

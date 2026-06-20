@@ -31,6 +31,10 @@ const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
         clean_detector: Some(reporting::detect_clean_implementation_audit),
     };
 
+pub fn descriptor() -> ServiceCommandDescriptor<'static> {
+    IMPLEMENTATION_AUDIT_DESCRIPTOR
+}
+
 pub fn resolve_plan_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
@@ -97,37 +101,6 @@ pub fn build_prompt(
 
 pub fn save_audit(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     service_command::save_markdown_artifact(output_dir, IMPLEMENTATION_AUDIT_DESCRIPTOR, content)
-}
-
-pub fn run(
-    command: &ImplementationAuditCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    let scope = command.implementation_path.as_deref().map_or_else(
-        || "git diff / workspace".to_string(),
-        |path| path.display().to_string(),
-    );
-
-    service_command::execute_service_command(
-        &command.service,
-        IMPLEMENTATION_AUDIT_DESCRIPTOR,
-        format!(
-            "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
-            command.plan_path.display(),
-            scope,
-            command.service.timeout.as_secs()
-        ),
-        save_audit,
-    )
-}
-
-pub fn run_silently(
-    command: &ImplementationAuditCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(
-        &command.service,
-        IMPLEMENTATION_AUDIT_DESCRIPTOR,
-        save_audit,
-    )
 }
 
 #[allow(dead_code)]

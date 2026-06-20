@@ -29,6 +29,10 @@ const FIX_LOOP_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDes
     clean_detector: None,
 };
 
+pub fn descriptor() -> ServiceCommandDescriptor<'static> {
+    FIX_LOOP_DESCRIPTOR
+}
+
 pub fn resolve_artifact_path(
     kind: ReviewSubject,
     path: PathBuf,
@@ -64,32 +68,6 @@ pub fn build_prompt(
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     service_command::save_markdown_artifact(output_dir, FIX_LOOP_DESCRIPTOR, content)
-}
-
-pub fn run(
-    command: &FixLoopCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command(
-        &command.service,
-        FIX_LOOP_DESCRIPTOR,
-        format!(
-            "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
-            command.input_kind,
-            command.artifact_path.display(),
-            command.service.timeout.as_secs()
-        ),
-        save_report,
-    )
-}
-
-pub fn run_silently(
-    command: &FixLoopCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(
-        &command.service,
-        FIX_LOOP_DESCRIPTOR,
-        save_report,
-    )
 }
 
 #[allow(dead_code)]

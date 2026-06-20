@@ -32,6 +32,10 @@ const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescr
     clean_detector: None,
 };
 
+pub fn descriptor() -> ServiceCommandDescriptor<'static> {
+    REVIEW_DESCRIPTOR
+}
+
 pub fn resolve_artifact_path(
     subject: ReviewSubject,
     path: PathBuf,
@@ -71,32 +75,6 @@ pub fn build_prompt(
 
 pub fn save_review(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     service_command::save_markdown_artifact(output_dir, REVIEW_DESCRIPTOR, content)
-}
-
-pub fn run(
-    command: &ReviewCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command(
-        &command.service,
-        REVIEW_DESCRIPTOR,
-        format!(
-            "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
-            command.subject,
-            command.artifact_path.display(),
-            command.service.timeout.as_secs()
-        ),
-        save_review,
-    )
-}
-
-pub fn run_silently(
-    command: &ReviewCommand,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(
-        &command.service,
-        REVIEW_DESCRIPTOR,
-        save_review,
-    )
 }
 
 #[allow(dead_code)]

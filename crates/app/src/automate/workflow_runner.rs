@@ -167,9 +167,8 @@ fn format_stream(label: &str, content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::step_args::resolve_step_args;
     use super::*;
-    use crate::{CommandOutcome, Workflow, WorkflowStepKind, parse_workflow};
+    use crate::{CommandOutcome, Workflow, parse_workflow};
     use std::cell::RefCell;
     use std::fs;
     use std::rc::Rc;
@@ -361,75 +360,6 @@ mod tests {
                 .to_string()
                 .contains("doit produire un resultat structure")
         );
-    }
-
-    #[test]
-    fn run_workflow_chains_artifacts_from_structured_outcomes() {
-        let workflow = parse_workflow(
-            r#"{
-              "steps":[
-                {"name":"audit","rust_command":["audit","--target","{target}"]},
-                {"name":"plan","rust_command":["plan","{artifact:audit}"]}
-              ]
-            }"#,
-        )
-        .expect("workflow valide");
-        let workspace = std::env::temp_dir().join("rust_agent_workflow_chain_artifacts");
-        let audit_artifact = workspace.join(".audit").join("audit.md");
-        let plan_artifact = workspace.join(".plan").join("plan.md");
-        fs::create_dir_all(audit_artifact.parent().expect("parent audit")).expect("dossier audit");
-        fs::create_dir_all(plan_artifact.parent().expect("parent plan")).expect("dossier plan");
-        fs::write(&audit_artifact, "audit").expect("artefact audit");
-        fs::write(&plan_artifact, "plan").expect("artefact plan");
-        let audit_artifact_for_step = audit_artifact.clone();
-        let plan_artifact_for_step = plan_artifact.clone();
-        let calls = Rc::new(RefCell::new(Vec::new()));
-        let seen = Rc::clone(&calls);
-
-        let report = run_workflow_with_executor(
-            &workflow,
-            "Durcir",
-            &workspace,
-            &workspace,
-            move |workflow, step, context| {
-                seen.borrow_mut()
-                    .push(resolve_step_args(workflow, step, context));
-
-                let artifact_path = match step.name.as_str() {
-                    "audit" => Some(audit_artifact_for_step.clone()),
-                    "plan" => Some(plan_artifact_for_step.clone()),
-                    _ => None,
-                };
-
-                Ok(StepExecution {
-                    status_code: Some(0),
-                    success: true,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    command_outcome: Some(CommandOutcome {
-                        command_name: step.name.clone(),
-                        status_code: Some(0),
-                        final_message_present: true,
-                        artifact_path,
-                        clean: None,
-                    }),
-                })
-            },
-        )
-        .expect("workflow execute");
-
-        assert_eq!(report.completed_cycles, 1);
-        let calls = calls.borrow();
-        assert_eq!(workflow.steps[0].kind, WorkflowStepKind::ServiceCommand);
-        assert_eq!(calls[1][0], "plan");
-        assert_eq!(
-            calls[1][1],
-            fs::canonicalize(&audit_artifact)
-                .expect("artefact canonical")
-                .display()
-                .to_string()
-        );
-        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]

@@ -11,6 +11,9 @@ pub const COMMAND_OUTCOME_PATH_ENV: &str = "RUST_AGENT_COMMAND_OUTCOME_PATH";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandOutcome {
+    // Transport payload emitted by service commands for automation. The child
+    // command reports raw completion facts here; workflow automation later
+    // normalizes artifact paths and interprets `clean` for loop stopping.
     pub command_name: String,
     pub status_code: Option<i32>,
     pub final_message_present: bool,

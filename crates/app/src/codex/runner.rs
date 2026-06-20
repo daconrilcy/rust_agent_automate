@@ -254,23 +254,14 @@ fn wait_or_terminate(child: &mut Child, grace_period: Duration) -> io::Result<Ex
 }
 
 pub(crate) fn read_final_message(path: &Path) -> io::Result<Option<String>> {
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-
-    let _ = fs::remove_file(path);
-
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trimmed.to_string()))
-    }
+    read_final_message_inner(path, true)
 }
 
 fn read_final_message_if_ready(path: &Path) -> io::Result<Option<String>> {
+    read_final_message_inner(path, false)
+}
+
+fn read_final_message_inner(path: &Path, remove_if_empty: bool) -> io::Result<Option<String>> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -279,6 +270,9 @@ fn read_final_message_if_ready(path: &Path) -> io::Result<Option<String>> {
 
     let trimmed = content.trim();
     if trimmed.is_empty() {
+        if remove_if_empty {
+            let _ = fs::remove_file(path);
+        }
         Ok(None)
     } else {
         let _ = fs::remove_file(path);
@@ -550,6 +544,44 @@ mod tests {
         let result = read_final_message(&path).expect("lecture du fichier temporaire");
 
         assert_eq!(result.as_deref(), Some("reponse finale"));
+        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+    }
+
+    #[test]
+    fn read_final_message_if_ready_preserves_empty_file() {
+        let path = std::env::temp_dir().join(format!(
+            "rust_agent_capture_ready_empty_{}.txt",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+
+        fs::write(&path, " \n\t ").expect("ecriture du fichier temporaire");
+
+        let result =
+            read_final_message_if_ready(&path).expect("lecture du fichier temporaire vide");
+
+        assert_eq!(result, None);
+        assert!(path.exists(), "le fichier vide doit rester disponible");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_final_message_if_ready_trims_and_deletes_file() {
+        let path = std::env::temp_dir().join(format!(
+            "rust_agent_capture_ready_{}.txt",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+
+        fs::write(&path, "  reponse prete  \n").expect("ecriture du fichier temporaire");
+
+        let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
+
+        assert_eq!(result.as_deref(), Some("reponse prete"));
         assert!(!path.exists(), "le fichier temporaire doit etre supprime");
     }
 

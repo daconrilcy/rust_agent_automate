@@ -4,8 +4,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::step_outcome::{
-    AutomateReport, StepExecution, StepResult, command_outcome_for_step, evaluate_clean_stop,
-    run_step,
+    AutomateReport, StepExecution, StepResult, WorkflowStepOutcome, command_outcome_for_step,
+    evaluate_clean_stop, run_step,
 };
 use super::workflow_model::{Workflow, WorkflowStep};
 
@@ -73,7 +73,7 @@ where
             let output = run_step(workflow, step, &context)?;
             let command_outcome = validated_command_outcome(workflow, step, &context, &output)?;
             apply_step_outcome(&mut context, step, &output, &command_outcome);
-            append_step_result(&mut report, cycle, step, command_outcome);
+            append_step_result(&mut report, cycle, step, &command_outcome);
             if !output.success {
                 return Err(step_failure(
                     step,
@@ -98,7 +98,7 @@ fn apply_step_outcome(
     context: &mut RunContext,
     step: &WorkflowStep,
     output: &StepExecution,
-    command_outcome: &crate::reporting::CommandOutcome,
+    command_outcome: &WorkflowStepOutcome,
 ) {
     if let Some(path) = &command_outcome.artifact_path {
         context
@@ -116,13 +116,13 @@ fn append_step_result(
     report: &mut AutomateReport,
     cycle: u32,
     step: &WorkflowStep,
-    command_outcome: crate::reporting::CommandOutcome,
+    command_outcome: &WorkflowStepOutcome,
 ) {
     report.step_results.push(StepResult {
         cycle,
         name: step.name.clone(),
         status_code: command_outcome.status_code,
-        artifact_path: command_outcome.artifact_path,
+        artifact_path: command_outcome.artifact_path.clone(),
     });
 }
 
@@ -143,9 +143,11 @@ fn validated_command_outcome(
     step: &WorkflowStep,
     context: &RunContext,
     output: &StepExecution,
-) -> io::Result<crate::reporting::CommandOutcome> {
-    // Workflow validation decides which steps may omit structured output and
-    // artifact paths are normalized here before later placeholder expansion.
+) -> io::Result<WorkflowStepOutcome> {
+    // The runner owns workflow-facing validation and artifact normalization.
+    // `step_outcome` decodes transport state, while this layer enforces
+    // workspace-local artifact paths before placeholder expansion and stores
+    // clean-loop state for later `evaluate_clean_stop`.
     let mut outcome = command_outcome_for_step(workflow, step, context, output)?;
     if let Some(path) = outcome.artifact_path.take() {
         outcome.artifact_path = Some(normalize_artifact_path(&path, &context.workspace_root)?);
@@ -210,7 +212,6 @@ fn format_stream(label: &str, content: &str) -> String {
 mod tests {
     use super::*;
     use crate::automate::workflow_model::parse_workflow;
-    use crate::reporting::CommandOutcome;
     use std::path::Path;
 
     #[test]
@@ -257,7 +258,7 @@ mod tests {
                     success: true,
                     stdout: String::new(),
                     stderr: String::new(),
-                    command_outcome: Some(CommandOutcome {
+                    command_outcome: Some(crate::reporting::CommandOutcome {
                         command_name: step.name.clone(),
                         status_code: Some(0),
                         final_message_present: true,
@@ -302,7 +303,7 @@ mod tests {
                     success: true,
                     stdout: String::new(),
                     stderr: String::new(),
-                    command_outcome: Some(CommandOutcome {
+                    command_outcome: Some(crate::reporting::CommandOutcome {
                         command_name: step.name.clone(),
                         status_code: Some(0),
                         final_message_present: true,
@@ -342,10 +343,8 @@ mod tests {
             stderr: String::new(),
             command_outcome: None,
         };
-        let outcome = crate::reporting::CommandOutcome {
-            command_name: "audit".to_string(),
+        let outcome = WorkflowStepOutcome {
             status_code: Some(0),
-            final_message_present: true,
             artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
             clean: Some(true),
         };

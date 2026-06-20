@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use app::automate::step_args::resolve_step_args;
-use app::automate::step_outcome::{StepExecution, command_outcome_for_step};
+use app::automate::step_outcome::StepExecution;
 use app::automate::workflow_model::{
     Workflow, WorkflowStepKind, default_refactor_workflow, parse_workflow,
 };
@@ -219,7 +219,7 @@ fn rejects_artifact_reference_to_direct_run_step() {
 }
 
 #[test]
-fn command_outcome_accepts_direct_run_when_prompt_starts_with_known_subcommand() {
+fn direct_run_without_structured_outcome_is_reported() {
     let workflow = parse_workflow(
         r#"{
           "defaults": {"model":"gpt-x","reasoning":"medium"},
@@ -227,22 +227,25 @@ fn command_outcome_accepts_direct_run_when_prompt_starts_with_known_subcommand()
         }"#,
     )
     .expect("workflow valide");
-    let step = &workflow.steps[0];
-    let output = StepExecution {
-        status_code: Some(0),
-        success: true,
-        stdout: "implementation terminee".to_string(),
-        stderr: String::new(),
-        command_outcome: None,
-    };
+    let report = run_workflow_with_executor(
+        &workflow,
+        "Prompt",
+        Path::new("C:\\repo"),
+        Path::new("C:\\repo"),
+        |_workflow, _step, _context| {
+            Ok(StepExecution {
+                status_code: Some(0),
+                success: true,
+                stdout: "implementation terminee".to_string(),
+                stderr: String::new(),
+                command_outcome: None,
+            })
+        },
+    )
+    .expect("une etape directe doit etre acceptee");
 
-    let outcome = command_outcome_for_step(&workflow, step, &RunContext::default(), &output)
-        .expect("une etape directe doit etre acceptee");
-
-    assert_eq!(outcome.command_name, "implementation");
-    assert_eq!(outcome.status_code, Some(0));
-    assert!(outcome.final_message_present);
-    assert_eq!(outcome.artifact_path, None);
+    assert_eq!(report.step_results[0].status_code, Some(0));
+    assert_eq!(report.step_results[0].artifact_path, None);
 }
 
 #[test]
@@ -253,17 +256,22 @@ fn command_outcome_requires_structured_result_for_nested_subcommands() {
         }"#,
     )
     .expect("workflow valide");
-    let step = &workflow.steps[0];
-    let output = StepExecution {
-        status_code: Some(0),
-        success: true,
-        stdout: "automate termine".to_string(),
-        stderr: String::new(),
-        command_outcome: None,
-    };
-
-    let error = command_outcome_for_step(&workflow, step, &RunContext::default(), &output)
-        .expect_err("une sous-commande imbriquee doit rester structuree");
+    let error = run_workflow_with_executor(
+        &workflow,
+        "Prompt",
+        Path::new("C:\\repo"),
+        Path::new("C:\\repo"),
+        |_workflow, _step, _context| {
+            Ok(StepExecution {
+                status_code: Some(0),
+                success: true,
+                stdout: "automate termine".to_string(),
+                stderr: String::new(),
+                command_outcome: None,
+            })
+        },
+    )
+    .expect_err("une sous-commande imbriquee doit rester structuree");
 
     assert!(
         error

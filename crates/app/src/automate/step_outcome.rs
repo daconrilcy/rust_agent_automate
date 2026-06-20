@@ -19,6 +19,13 @@ struct StepCommandSpec {
     outcome_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkflowStepOutcome {
+    pub(crate) status_code: Option<i32>,
+    pub(crate) artifact_path: Option<PathBuf>,
+    pub(crate) clean: Option<bool>,
+}
+
 #[derive(Debug)]
 pub struct AutomateReport {
     pub completed_cycles: u32,
@@ -55,23 +62,28 @@ pub fn run_step(
     Ok(step_execution_from_output(output, command_outcome))
 }
 
-pub fn command_outcome_for_step(
+pub(crate) fn command_outcome_for_step(
     _workflow: &Workflow,
     step: &WorkflowStep,
     _context: &RunContext,
     output: &StepExecution,
-) -> io::Result<CommandOutcome> {
+) -> io::Result<WorkflowStepOutcome> {
+    // Transport decoding lives in this module. The workflow runner only
+    // consumes this reduced state and does not depend on the persisted
+    // `CommandOutcome` payload shape beyond these fields.
     if let Some(outcome) = &output.command_outcome {
         let mut outcome = outcome.clone();
         outcome.status_code = normalized_status_code(outcome.status_code);
-        return Ok(outcome);
+        return Ok(WorkflowStepOutcome {
+            status_code: outcome.status_code,
+            artifact_path: outcome.artifact_path,
+            clean: outcome.clean,
+        });
     }
 
     if matches!(step.kind, WorkflowStepKind::DirectRun) {
-        return Ok(CommandOutcome {
-            command_name: step.name.clone(),
+        return Ok(WorkflowStepOutcome {
             status_code: normalized_status_code(output.status_code),
-            final_message_present: !output.stdout.trim().is_empty(),
             artifact_path: None,
             clean: None,
         });
@@ -166,9 +178,10 @@ fn temp_outcome_file_path() -> PathBuf {
     ))
 }
 
-// Child steps publish their structured result through
-// `RUST_AGENT_COMMAND_OUTCOME_PATH`; the workflow runner consumes that file and
-// keeps loop decisions tied to structured state instead of markdown parsing.
+// Child steps own process execution and publish their transport payload through
+// `RUST_AGENT_COMMAND_OUTCOME_PATH`. This module decodes that payload into
+// `CommandOutcome`; workflow-facing shaping happens in `command_outcome_for_step`
+// and later artifact normalization remains the runner's responsibility.
 fn decode_command_outcome(path: &Path) -> io::Result<Option<CommandOutcome>> {
     let content = match fs::read(path) {
         Ok(content) => content,
@@ -197,6 +210,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::automate::workflow_model::parse_workflow;
     #[test]
     fn decode_command_outcome_rejects_invalid_json() {
         let path = temp_outcome_file_path();
@@ -252,5 +266,37 @@ mod tests {
         assert!(execution.success);
         assert_eq!(execution.stdout, "ok");
         assert_eq!(execution.stderr, "err");
+    }
+
+    #[test]
+    fn command_outcome_for_step_extracts_automation_state() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
+        )
+        .expect("workflow valide");
+        let step = &workflow.steps[0];
+        let output = StepExecution {
+            status_code: Some(0),
+            success: true,
+            stdout: String::new(),
+            stderr: String::new(),
+            command_outcome: Some(CommandOutcome {
+                command_name: step.name.clone(),
+                status_code: Some(0),
+                final_message_present: true,
+                artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
+                clean: Some(true),
+            }),
+        };
+
+        let outcome = command_outcome_for_step(&workflow, step, &RunContext::default(), &output)
+            .expect("resultat structure");
+
+        assert_eq!(outcome.status_code, Some(0));
+        assert_eq!(
+            outcome.artifact_path,
+            Some(PathBuf::from("C:\\repo\\.audit\\audit.md"))
+        );
+        assert_eq!(outcome.clean, Some(true));
     }
 }

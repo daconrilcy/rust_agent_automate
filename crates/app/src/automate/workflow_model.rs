@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
-use crate::command_registry;
-use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomateCommand {
@@ -98,7 +96,7 @@ pub fn parse_workflow(content: &str) -> Result<Workflow, String> {
     let workflow: Workflow = serde_json::from_str(content)
         .map_err(|error| format!("workflow JSON invalide: {error}"))?;
 
-    validate_workflow(workflow)
+    validate_workflow(workflow, super::classify_step_kind)
 }
 
 pub fn default_refactor_workflow() -> Workflow {
@@ -106,12 +104,10 @@ pub fn default_refactor_workflow() -> Workflow {
         .expect("le workflow de refactoring integre est valide")
 }
 
-pub fn resolve_target_dir(path: PathBuf, context: &ExecutionContext) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
-        .map_err(|error| error.replace("le chemin dossier cible", "le dossier cible"))
-}
-
-fn validate_workflow(workflow: Workflow) -> Result<Workflow, String> {
+fn validate_workflow(
+    workflow: Workflow,
+    classify_step_kind: fn(&[String]) -> WorkflowStepKind,
+) -> Result<Workflow, String> {
     if workflow.steps.is_empty() {
         return Err("le workflow doit definir au moins une etape".to_string());
     }
@@ -219,20 +215,6 @@ fn referenced_artifacts(command: &[String]) -> Vec<&str> {
     references
 }
 
-fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
-    let Some(first) = rust_command.first().map(String::as_str) else {
-        return WorkflowStepKind::DirectRun;
-    };
-
-    if command_registry::accepts_codex_options(first) {
-        WorkflowStepKind::ServiceCommand
-    } else if command_registry::is_direct_run(Some(first)) {
-        WorkflowStepKind::DirectRun
-    } else {
-        WorkflowStepKind::NestedCommand
-    }
-}
-
 fn default_max_cycles() -> u32 {
     2
 }
@@ -250,83 +232,3 @@ fn default_clean_markers() -> Vec<String> {
 }
 
 const DEFAULT_REFACTOR_WORKFLOW: &str = include_str!("../../../../workflows/refactor.json");
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_empty_workflow() {
-        let error = parse_workflow(r#"{"steps":[]}"#).expect_err("workflow vide invalide");
-        assert_eq!(error, "le workflow doit definir au moins une etape");
-    }
-
-    #[test]
-    fn defaults_steps_to_fresh_codex_calls() {
-        let workflow = parse_workflow(
-            r#"{
-              "steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]
-            }"#,
-        )
-        .expect("workflow valide");
-
-        assert!(workflow.steps[0].fresh_codex_call);
-    }
-
-    #[test]
-    fn rejects_unknown_artifact_reference_during_validation() {
-        let error = parse_workflow(
-            r#"{
-              "steps":[{"name":"plan","rust_command":["plan","{artifact:audit}"]}]
-            }"#,
-        )
-        .expect_err("les references d'artefact inconnues doivent etre rejetees");
-
-        assert!(error.contains("artefact inconnu"));
-    }
-
-    #[test]
-    fn rejects_future_artifact_reference_during_validation() {
-        let error = parse_workflow(
-            r#"{
-              "steps":[
-                {"name":"plan","rust_command":["plan","{artifact:audit}"]},
-                {"name":"audit","rust_command":["audit","--target","{target}"]}
-              ]
-            }"#,
-        )
-        .expect_err("les references futures doivent etre rejetees");
-
-        assert!(error.contains("artefact futur"));
-    }
-
-    #[test]
-    fn rejects_artifact_reference_to_direct_run_step() {
-        let error = parse_workflow(
-            r#"{
-              "steps":[
-                {"name":"implementation","rust_command":["--mode","exec","Implement"]},
-                {"name":"audit","rust_command":["implementation-audit","{artifact:implementation}"]}
-              ]
-            }"#,
-        )
-        .expect_err("une etape directe ne produit pas d'artefact structure");
-
-        assert!(error.contains("execution directe"));
-    }
-
-    #[test]
-    fn rejects_loop_policy_on_direct_run_step_during_validation() {
-        let error = parse_workflow(
-            r#"{
-              "steps":[
-                {"name":"alignment_audit","rust_command":["--mode","exec","Audit"]}]
-              ,
-              "loop_policy":{"audit_step":"alignment_audit","max_cycles":2}
-            }"#,
-        )
-        .expect_err("loop_policy doit pointer vers une commande structuree");
-
-        assert!(error.contains("commande structuree"));
-    }
-}

@@ -17,7 +17,7 @@ pub struct PlanCommand {
     pub audit_path: PathBuf,
 }
 
-const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+pub(crate) const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".plan",
     command_name: "plan",
     artifact_stem: "plan",
@@ -26,10 +26,6 @@ const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescrip
     missing_message_label: "plan",
     clean_detector: None,
 };
-
-pub fn descriptor() -> ServiceCommandDescriptor<'static> {
-    PLAN_DESCRIPTOR
-}
 
 pub fn resolve_audit_file(
     path: PathBuf,

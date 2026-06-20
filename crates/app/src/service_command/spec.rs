@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{io, path::Path};
 
 use crate::codex::{
     CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
@@ -36,6 +37,8 @@ pub struct ServiceCommandSpec {
     pub accepts_codex_options: bool,
     pub usage: &'static [&'static str],
     pub examples: &'static [&'static str],
+    pub descriptor: ServiceCommandDescriptor<'static>,
+    pub save_artifact: fn(&Path, &str) -> io::Result<PathBuf>,
     pub parse_for_context: fn(
         &[String],
         &ExecutionContext,
@@ -114,6 +117,8 @@ pub const AUDIT_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
         "cargo run -q -p app -- audit --output-dir .audit",
         "cargo run -q -p app -- audit --timeout-seconds 120",
     ],
+    descriptor: crate::audit::AUDIT_DESCRIPTOR,
+    save_artifact: crate::audit::save_report,
     parse_for_context: |args, context| {
         crate::audit::parse_args_for_context(args, context).map(ServiceCommandDispatch::Audit)
     },
@@ -131,6 +136,8 @@ pub const PLAN_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
         "cargo run -q -p app -- plan .audit\\audit-1781887189.md",
         "cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan",
     ],
+    descriptor: crate::plan::PLAN_DESCRIPTOR,
+    save_artifact: crate::plan::save_plan,
     parse_for_context: |args, context| {
         crate::plan::parse_args_for_context(args, context).map(ServiceCommandDispatch::Plan)
     },
@@ -149,6 +156,8 @@ pub const IMPLEMENTATION_AUDIT_SERVICE_COMMAND_SPEC: ServiceCommandSpec = Servic
         "cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md",
         "cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app",
     ],
+    descriptor: crate::implementation_audit::IMPLEMENTATION_AUDIT_DESCRIPTOR,
+    save_artifact: crate::implementation_audit::save_audit,
     parse_for_context: |args, context| {
         crate::implementation_audit::parse_args_for_context(args, context)
             .map(ServiceCommandDispatch::ImplementationAudit)
@@ -168,6 +177,8 @@ pub const REVIEW_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
         "cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md",
         "cargo run -q -p app -- review implementation crates\\app",
     ],
+    descriptor: crate::review::REVIEW_DESCRIPTOR,
+    save_artifact: crate::review::save_review,
     parse_for_context: |args, context| {
         crate::review::parse_args_for_context(args, context).map(ServiceCommandDispatch::Review)
     },
@@ -188,6 +199,8 @@ pub const FIX_LOOP_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec
         "cargo run -q -p app -- fix-loop implementation crates\\app",
         "cargo run -q -p app -- loop implementation crates\\app",
     ],
+    descriptor: crate::fix_loop::FIX_LOOP_DESCRIPTOR,
+    save_artifact: crate::fix_loop::save_report,
     parse_for_context: |args, context| {
         crate::fix_loop::parse_args_for_context(args, context).map(ServiceCommandDispatch::FixLoop)
     },
@@ -204,7 +217,7 @@ pub const SERVICE_COMMAND_SPECS: &[ServiceCommandSpec] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CodexMode, ReasoningEffort};
+    use crate::codex::{CodexMode, ReasoningEffort};
 
     #[test]
     fn builds_exec_request_from_common_options() {

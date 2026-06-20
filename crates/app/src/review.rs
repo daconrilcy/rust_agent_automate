@@ -22,7 +22,7 @@ pub struct ReviewCommand {
     pub artifact_path: PathBuf,
 }
 
-const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+pub(crate) const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".review",
     command_name: "review",
     artifact_stem: "review",
@@ -31,10 +31,6 @@ const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescr
     missing_message_label: "review",
     clean_detector: None,
 };
-
-pub fn descriptor() -> ServiceCommandDescriptor<'static> {
-    REVIEW_DESCRIPTOR
-}
 
 pub fn resolve_artifact_path(
     subject: ReviewSubject,

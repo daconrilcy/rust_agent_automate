@@ -1,12 +1,13 @@
 mod support;
 
-pub use app::{ParseOutcome, parse_timeout};
+pub use app::cli::{ParseOutcome, parse_timeout};
 
 use std::path::Path;
 use std::time::Duration;
 
-use app::{
-    CliCommand, CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+use app::cli::CliCommand;
+use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use app::service_command::{
     ServiceCommandDispatch, ServiceCommandOptions, parse_with_common_options,
 };
 use support::{command_kind, normalize_path, parse, request_for};

@@ -92,27 +92,28 @@ impl<'a> ServiceCommandLifecycle<'a> {
 }
 
 trait ServiceCommandLifecycleSource {
+    fn kind(&self) -> super::ServiceCommandKind;
     fn service(&self) -> &PreparedServiceCommand;
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static>;
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf>;
     fn intro(&self) -> String;
 
     fn lifecycle(&self) -> ServiceCommandLifecycle<'_> {
-        ServiceCommandLifecycle::new(self.service(), self.descriptor(), self.save(), self.intro())
+        let spec = self.kind().spec();
+        ServiceCommandLifecycle::new(
+            self.service(),
+            spec.descriptor,
+            spec.save_artifact,
+            self.intro(),
+        )
     }
 }
 
 impl ServiceCommandLifecycleSource for crate::audit::AuditCommand {
+    fn kind(&self) -> super::ServiceCommandKind {
+        super::ServiceCommandKind::Audit
+    }
+
     fn service(&self) -> &PreparedServiceCommand {
         &self.service
-    }
-
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
-        crate::audit::descriptor()
-    }
-
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
-        crate::audit::save_report
     }
 
     fn intro(&self) -> String {
@@ -125,16 +126,12 @@ impl ServiceCommandLifecycleSource for crate::audit::AuditCommand {
 }
 
 impl ServiceCommandLifecycleSource for crate::plan::PlanCommand {
+    fn kind(&self) -> super::ServiceCommandKind {
+        super::ServiceCommandKind::Plan
+    }
+
     fn service(&self) -> &PreparedServiceCommand {
         &self.service
-    }
-
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
-        crate::plan::descriptor()
-    }
-
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
-        crate::plan::save_plan
     }
 
     fn intro(&self) -> String {
@@ -147,16 +144,12 @@ impl ServiceCommandLifecycleSource for crate::plan::PlanCommand {
 }
 
 impl ServiceCommandLifecycleSource for crate::implementation_audit::ImplementationAuditCommand {
+    fn kind(&self) -> super::ServiceCommandKind {
+        super::ServiceCommandKind::ImplementationAudit
+    }
+
     fn service(&self) -> &PreparedServiceCommand {
         &self.service
-    }
-
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
-        crate::implementation_audit::descriptor()
-    }
-
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
-        crate::implementation_audit::save_audit
     }
 
     fn intro(&self) -> String {
@@ -173,16 +166,12 @@ impl ServiceCommandLifecycleSource for crate::implementation_audit::Implementati
 }
 
 impl ServiceCommandLifecycleSource for crate::review::ReviewCommand {
+    fn kind(&self) -> super::ServiceCommandKind {
+        super::ServiceCommandKind::Review
+    }
+
     fn service(&self) -> &PreparedServiceCommand {
         &self.service
-    }
-
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
-        crate::review::descriptor()
-    }
-
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
-        crate::review::save_review
     }
 
     fn intro(&self) -> String {
@@ -196,16 +185,12 @@ impl ServiceCommandLifecycleSource for crate::review::ReviewCommand {
 }
 
 impl ServiceCommandLifecycleSource for crate::fix_loop::FixLoopCommand {
+    fn kind(&self) -> super::ServiceCommandKind {
+        super::ServiceCommandKind::FixLoop
+    }
+
     fn service(&self) -> &PreparedServiceCommand {
         &self.service
-    }
-
-    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
-        crate::fix_loop::descriptor()
-    }
-
-    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
-        crate::fix_loop::save_report
     }
 
     fn intro(&self) -> String {

@@ -7,3 +7,4 @@
 .cargo-target-loop*/
 .audit_tmp_target/
 .target-verify/
+target-audit-verify/

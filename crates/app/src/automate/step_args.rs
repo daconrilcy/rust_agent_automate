@@ -78,7 +78,8 @@ fn expand_placeholders(value: &str, context: &RunContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DEFAULT_MODEL, parse_workflow};
+    use crate::automate::{WorkflowStepKind, parse_workflow};
+    use crate::codex::DEFAULT_MODEL;
     use std::path::PathBuf;
 
     #[test]
@@ -186,10 +187,7 @@ mod tests {
 
         let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
 
-        assert_eq!(
-            workflow.steps[0].kind,
-            crate::WorkflowStepKind::NestedCommand
-        );
+        assert_eq!(workflow.steps[0].kind, WorkflowStepKind::NestedCommand);
         assert_eq!(args, vec!["automate", "workflow.json", "Initial prompt"]);
     }
 

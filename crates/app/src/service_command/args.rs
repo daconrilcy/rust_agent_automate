@@ -216,7 +216,7 @@ pub fn parse_required_path_with_optional_named_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ReasoningEffort;
+    use crate::codex::ReasoningEffort;
     use std::time::Duration;
 
     #[test]

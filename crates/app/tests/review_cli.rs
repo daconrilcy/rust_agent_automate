@@ -3,7 +3,10 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::{CliCommand, CodexMode, ReviewSubject, ServiceCommandDispatch};
+use app::artifact_subject::ReviewSubject;
+use app::cli::CliCommand;
+use app::codex::CodexMode;
+use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
 
@@ -97,7 +100,7 @@ fn rejects_duplicate_review_type_argument() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error("le type de review a deja ete fourni".to_string())
+        app::cli::ParseOutcome::Error("le type de review a deja ete fourni".to_string())
     );
 }
 
@@ -116,7 +119,7 @@ fn rejects_duplicate_review_artifact_argument() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error("l'artefact de review a deja ete fourni".to_string())
+        app::cli::ParseOutcome::Error("l'artefact de review a deja ete fourni".to_string())
     );
 }
 
@@ -126,7 +129,7 @@ fn rejects_review_without_type() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error(
+        app::cli::ParseOutcome::Error(
             "la commande review requiert un type: plan, audit ou implementation".to_string()
         )
     );
@@ -138,7 +141,7 @@ fn rejects_review_without_artifact() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error(
+        app::cli::ParseOutcome::Error(
             "la commande review requiert un artefact. Exemple: cargo run -p app -- review plan .plan\\plan.md"
                 .to_string()
         )

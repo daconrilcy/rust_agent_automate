@@ -3,7 +3,9 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::{CliCommand, CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ServiceCommandDispatch};
+use app::cli::CliCommand;
+use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
 
@@ -111,7 +113,7 @@ fn rejects_implementation_audit_without_plan_path() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error(
+        app::cli::ParseOutcome::Error(
             "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
                 .to_string()
         )

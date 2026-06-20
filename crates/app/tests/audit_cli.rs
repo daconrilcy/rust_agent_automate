@@ -3,7 +3,9 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::{CliCommand, CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ServiceCommandDispatch};
+use app::cli::CliCommand;
+use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use app::service_command::ServiceCommandDispatch;
 
 use support::{normalize_path, parse};
 
@@ -89,7 +91,7 @@ fn rejects_zero_audit_timeout() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error(
+        app::cli::ParseOutcome::Error(
             "timeout invalide: 0. Valeur attendue: nombre de secondes positif".to_string()
         )
     );
@@ -115,7 +117,7 @@ fn rejects_positional_argument_for_audit() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error("argument inattendu pour audit: foo".to_string())
+        app::cli::ParseOutcome::Error("argument inattendu pour audit: foo".to_string())
     );
 }
 
@@ -126,6 +128,6 @@ fn rejects_duplicate_audit_model_option() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
+        app::cli::ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
     );
 }

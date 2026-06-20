@@ -19,19 +19,16 @@ pub struct FixLoopCommand {
     pub artifact_path: PathBuf,
 }
 
-const FIX_LOOP_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
-    default_output_dir: ".fix-loop",
-    command_name: "fix-loop",
-    artifact_stem: "fix-loop",
-    saved_label: "rapport fix-loop",
-    final_label: "rapport fix-loop",
-    missing_message_label: "rapport fix-loop",
-    clean_detector: None,
-};
-
-pub fn descriptor() -> ServiceCommandDescriptor<'static> {
-    FIX_LOOP_DESCRIPTOR
-}
+pub(crate) const FIX_LOOP_DESCRIPTOR: ServiceCommandDescriptor<'static> =
+    ServiceCommandDescriptor {
+        default_output_dir: ".fix-loop",
+        command_name: "fix-loop",
+        artifact_stem: "fix-loop",
+        saved_label: "rapport fix-loop",
+        final_label: "rapport fix-loop",
+        missing_message_label: "rapport fix-loop",
+        clean_detector: None,
+    };
 
 pub fn resolve_artifact_path(
     kind: ReviewSubject,

@@ -16,17 +16,37 @@ mod workflow_runner;
 use std::path::PathBuf;
 
 use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen_with_message, next_value, scan_args};
-use crate::service_paths;
+use crate::command_registry;
+use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
 #[allow(unused_imports)]
 pub use step_outcome::{AutomateReport, StepResult};
 #[allow(unused_imports)]
 pub use workflow_model::{
     AutomateCommand, LoopPolicy, RefactorAutomateCommand, Workflow, WorkflowDefaults, WorkflowStep,
-    WorkflowStepKind, default_refactor_workflow, load_workflow, parse_workflow, resolve_target_dir,
+    WorkflowStepKind, default_refactor_workflow, load_workflow, parse_workflow,
 };
 #[allow(unused_imports)]
 pub use workflow_runner::run_workflow;
+
+pub(crate) fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
+    let Some(first) = rust_command.first().map(String::as_str) else {
+        return WorkflowStepKind::DirectRun;
+    };
+
+    if command_registry::accepts_codex_options(first) {
+        WorkflowStepKind::ServiceCommand
+    } else if command_registry::is_direct_run(Some(first)) {
+        WorkflowStepKind::DirectRun
+    } else {
+        WorkflowStepKind::NestedCommand
+    }
+}
+
+pub fn resolve_target_dir(path: PathBuf, context: &ExecutionContext) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
+        .map_err(|error| error.replace("le chemin dossier cible", "le dossier cible"))
+}
 
 pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
     let mut workflow_path: Option<PathBuf> = None;

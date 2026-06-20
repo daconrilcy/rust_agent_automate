@@ -20,7 +20,7 @@ pub struct ImplementationAuditCommand {
     pub implementation_path: Option<PathBuf>,
 }
 
-const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
+pub(crate) const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
     ServiceCommandDescriptor {
         default_output_dir: ".audit",
         command_name: "implementation-audit",
@@ -30,10 +30,6 @@ const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
         missing_message_label: "audit d'implementation",
         clean_detector: Some(reporting::detect_clean_implementation_audit),
     };
-
-pub fn descriptor() -> ServiceCommandDescriptor<'static> {
-    IMPLEMENTATION_AUDIT_DESCRIPTOR
-}
 
 pub fn resolve_plan_file(
     path: PathBuf,

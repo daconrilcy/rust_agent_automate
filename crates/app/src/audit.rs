@@ -17,7 +17,7 @@ pub struct AuditCommand {
     pub target_dir: PathBuf,
 }
 
-const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+pub(crate) const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".audit",
     command_name: "audit",
     artifact_stem: "audit",
@@ -26,10 +26,6 @@ const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescri
     missing_message_label: "rapport d'audit",
     clean_detector: None,
 };
-
-pub fn descriptor() -> ServiceCommandDescriptor<'static> {
-    AUDIT_DESCRIPTOR
-}
 
 pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path) -> String {
     render_structured_prompt(

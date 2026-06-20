@@ -58,17 +58,3 @@ pub fn run_until_final_message(request: &CodexRequest, timeout: Duration) -> io:
         ),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn process_exit_code_maps_non_portable_child_statuses_to_generic_failure() {
-        assert_eq!(process_exit_code(Some(0)), 0);
-        assert_eq!(process_exit_code(Some(7)), 7);
-        assert_eq!(process_exit_code(Some(-1)), 1);
-        assert_eq!(process_exit_code(Some(256)), 1);
-        assert_eq!(process_exit_code(None), 1);
-    }
-}

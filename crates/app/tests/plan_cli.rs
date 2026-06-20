@@ -3,7 +3,9 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::{CliCommand, CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ServiceCommandDispatch};
+use app::cli::CliCommand;
+use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
 
@@ -75,7 +77,9 @@ fn rejects_duplicate_plan_audit_argument() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error("l'audit a deja ete fourni pour la commande plan".to_string())
+        app::cli::ParseOutcome::Error(
+            "l'audit a deja ete fourni pour la commande plan".to_string()
+        )
     );
 }
 
@@ -85,7 +89,7 @@ fn rejects_plan_without_audit_path() {
 
     assert_eq!(
         error,
-        app::ParseOutcome::Error(
+        app::cli::ParseOutcome::Error(
             "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
                 .to_string()
         )

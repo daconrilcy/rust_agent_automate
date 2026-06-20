@@ -7,8 +7,8 @@ mod exec;
 mod spec;
 
 pub(crate) use args::{
-    ServiceCommandParseError, parse_required_path_with_optional_named_path,
-    parse_subject_and_artifact, parse_with_common_options,
+    ServiceCommandParseError, parse_required_path, parse_required_path_with_optional_named_path,
+    parse_subject_and_artifact,
 };
 pub(crate) use context::{
     prepare_prompted_service, prepare_required_path_service, resolve_context,
@@ -60,6 +60,7 @@ pub(crate) struct RequiredPathParseSpec<'a> {
     pub required_example: &'a str,
     pub duplicate_required_message: &'a str,
     pub duplicate_optional_message: &'a str,
+    pub allow_positional: bool,
 }
 
 pub(crate) fn dispatch_service_args_for_context(

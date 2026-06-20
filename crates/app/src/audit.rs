@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{ParseOutcome, next_value};
+use crate::cli::ParseOutcome;
 use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
     self, ParsedRequiredPath, PreparedServiceCommand, ServiceCommandDescriptor,
@@ -100,27 +100,27 @@ pub fn parse_args_for_context(
     context: &service_paths::ExecutionContext,
 ) -> Result<AuditCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
-    let mut target_dir: Option<PathBuf> = None;
-
-    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
-        "--target" => {
-            let value = next_value(args, index, "--target")?;
-            target_dir = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
-        value => Err(ParseOutcome::Error(format!(
-            "argument inattendu pour audit: {value}"
-        ))),
-    })?;
+    let target_dir = service_command::parse_required_path(
+        args,
+        &mut common,
+        service_command::RequiredPathParseSpec {
+            required_option_name: "--target",
+            optional_option_name: "",
+            command_name: "audit",
+            required_label: "un dossier cible",
+            required_example: "cargo run -p app -- audit --target ..\\mon-projet",
+            duplicate_required_message: "la cible de audit a deja ete fournie",
+            duplicate_optional_message: "",
+            allow_positional: false,
+        },
+    )?
+    .unwrap_or_else(|| context.workspace_root().to_path_buf());
     let prepared = service_command::prepare_required_path_service(
         &common,
         AUDIT_DESCRIPTOR,
         context.clone(),
         ParsedRequiredPath {
-            required_path: target_dir.unwrap_or_else(|| context.workspace_root().to_path_buf()),
+            required_path: target_dir,
             optional_path: None,
         },
         |target_dir, _unused, resolution_context| {

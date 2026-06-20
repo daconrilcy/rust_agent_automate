@@ -140,6 +140,7 @@ fn capture_positional_path(
     Ok(1)
 }
 
+#[allow(dead_code)]
 pub fn parse_with_common_options<F>(
     args: &[String],
     options: &mut ServiceCommandOptions,
@@ -305,6 +306,35 @@ pub fn parse_required_path_with_optional_named_path(
     })
 }
 
+pub fn parse_required_path(
+    args: &[String],
+    options: &mut ServiceCommandOptions,
+    spec: RequiredPathParseSpec<'_>,
+) -> Result<Option<PathBuf>, ParseOutcome> {
+    let mut required_path: Option<PathBuf> = None;
+
+    parse_with_common_options_internal(args, options, |index, value| match value {
+        value if value == spec.required_option_name => capture_named_path(
+            &mut required_path,
+            args,
+            index,
+            spec.required_option_name,
+            ServiceCommandParseError::Message(spec.duplicate_required_message.to_string()),
+        ),
+        value if value.starts_with("--") => reject_unknown_option(value),
+        value if spec.allow_positional => {
+            capture_positional_path(&mut required_path, spec.command_name, value)
+        }
+        value => Err(ServiceCommandParseError::Message(format!(
+            "argument inattendu pour {}: {value}",
+            spec.command_name
+        ))),
+    })
+    .map_err(parse_outcome)?;
+
+    Ok(required_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +422,7 @@ mod tests {
                 required_example: "cargo run -p app -- implementation-audit .plan\\plan.md",
                 duplicate_required_message: "plan duplique",
                 duplicate_optional_message: "implementation dupliquee",
+                allow_positional: true,
             },
         )
         .expect("parse valide");
@@ -399,5 +430,32 @@ mod tests {
         assert_eq!(parsed.required_path, PathBuf::from("plan.md"));
         assert_eq!(parsed.optional_path, Some(PathBuf::from("crates\\app")));
         assert_eq!(options.timeout, Duration::from_secs(42));
+    }
+
+    #[test]
+    fn parses_required_path_arguments() {
+        let args = ["Cargo.toml"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut options = ServiceCommandOptions::new(Duration::from_secs(900));
+
+        let parsed = parse_required_path(
+            &args,
+            &mut options,
+            RequiredPathParseSpec {
+                required_option_name: "--audit",
+                optional_option_name: "",
+                command_name: "plan",
+                required_label: "un chemin d'audit",
+                required_example: "cargo run -p app -- plan Cargo.toml",
+                duplicate_required_message: "audit duplique",
+                duplicate_optional_message: "unused",
+                allow_positional: true,
+            },
+        )
+        .expect("parse valide");
+
+        assert_eq!(parsed, Some(PathBuf::from("Cargo.toml")));
     }
 }

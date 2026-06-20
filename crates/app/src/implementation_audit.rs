@@ -124,6 +124,7 @@ pub fn parse_args_for_context(
             required_example: "cargo run -p app -- implementation-audit .plan\\plan.md",
             duplicate_required_message: "le plan d'implementation a deja ete fourni",
             duplicate_optional_message: "le chemin d'implementation a deja ete fourni",
+            allow_positional: true,
         },
     )?;
     let prepared = service_command::prepare_required_path_service(

@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{ParseOutcome, next_value};
+use crate::cli::ParseOutcome;
 use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
     self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
@@ -92,32 +92,25 @@ pub fn parse_args_for_context(
     context: &service_paths::ExecutionContext,
 ) -> Result<PlanCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
-    let mut audit_path: Option<PathBuf> = None;
-
-    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
-        "--audit" => {
-            let value = next_value(args, index, "--audit")?;
-            if audit_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    "l'audit a deja ete fourni pour la commande plan".to_string(),
-                ));
-            }
-            audit_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
-        value => {
-            if audit_path.is_some() {
-                Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour plan: {value}"
-                )))
-            } else {
-                audit_path = Some(PathBuf::from(value));
-                Ok(1)
-            }
-        }
+    let audit_path = service_command::parse_required_path(
+        args,
+        &mut common,
+        service_command::RequiredPathParseSpec {
+            required_option_name: "--audit",
+            optional_option_name: "",
+            command_name: "plan",
+            required_label: "un chemin d'audit",
+            required_example: "cargo run -p app -- plan .audit\\audit.md",
+            duplicate_required_message: "l'audit a deja ete fourni pour la commande plan",
+            duplicate_optional_message: "",
+            allow_positional: true,
+        },
+    )?
+    .ok_or_else(|| {
+        ParseOutcome::Error(
+            "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
+                .to_string(),
+        )
     })?;
 
     let prepared = service_command::prepare_required_path_service(
@@ -125,15 +118,12 @@ pub fn parse_args_for_context(
         PLAN_DESCRIPTOR,
         context.clone(),
         service_command::ParsedRequiredPath {
-            required_path: audit_path.ok_or_else(|| {
-                ParseOutcome::Error(
-                    "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
-                        .to_string(),
-                )
-            })?,
+            required_path: audit_path,
             optional_path: None,
         },
-        |audit_path, _unused, resolution_context| resolve_audit_file(audit_path, resolution_context),
+        |audit_path, _unused, resolution_context| {
+            resolve_audit_file(audit_path, resolution_context)
+        },
         |parse_context, audit_path| {
             build_prompt(
                 &parse_context.workspace_root,

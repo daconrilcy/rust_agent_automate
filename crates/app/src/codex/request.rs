@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
@@ -81,6 +82,7 @@ pub struct CodexRequest {
     pub prompt: Option<String>,
     pub verbose: bool,
     pub resume_last: bool,
+    pub working_dir: Option<PathBuf>,
 }
 
 impl CodexRequest {
@@ -98,11 +100,17 @@ impl CodexRequest {
             prompt,
             verbose,
             resume_last: false,
+            working_dir: None,
         }
     }
 
     pub fn with_resume_last(mut self, resume_last: bool) -> Self {
         self.resume_last = resume_last;
+        self
+    }
+
+    pub fn with_working_dir(mut self, working_dir: PathBuf) -> Self {
+        self.working_dir = Some(working_dir);
         self
     }
 }

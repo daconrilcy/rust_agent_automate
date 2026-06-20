@@ -2,9 +2,12 @@ use std::io;
 use std::path::Path;
 use std::process::Command;
 
-pub fn is_inside_git_repository() -> io::Result<bool> {
-    let current = std::env::current_dir()?;
-    is_inside_git_repository_from(&current)
+pub fn is_inside_git_repository_at(start: Option<&Path>) -> io::Result<bool> {
+    let start = match start {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    is_inside_git_repository_from(&start)
 }
 
 pub fn is_inside_git_repository_from(start: &Path) -> io::Result<bool> {

@@ -12,7 +12,9 @@ use app::codex::{
 };
 use app::command_registry;
 use app::review::ReviewSubject;
-use app::service_command::{ServiceCommandDispatch, ServiceCommandOptions, parse_with_common_options};
+use app::service_command::{
+    ServiceCommandDispatch, ServiceCommandOptions, parse_with_common_options,
+};
 
 fn normalize_path(path: &Path) -> String {
     std::fs::canonicalize(path)
@@ -93,6 +95,53 @@ fn plan_command_runs_end_to_end_and_saves_the_expected_artifact() {
     let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
     assert!(logged.contains("$refactor-plan-from-audit"));
     assert!(logged.contains("references/plan-template.md"));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn audit_command_runs_end_to_end_and_executes_codex_from_the_workspace_root() {
+    let workspace = support::temp_dir("audit_lifecycle");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
+    let log_path = workspace.join("codex.log");
+    fs::create_dir_all(&workspace).expect("creation du workspace");
+    fs::create_dir_all(workspace.join("target-dir")).expect("creation du dossier cible");
+
+    let mut command = support::build_command();
+    command
+        .current_dir(&workspace)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
+        .env(
+            "PATH",
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+        )
+        .env("USERPROFILE", &workspace)
+        .env("FAKE_CODEX_LOG", &log_path)
+        .args(["audit", "--target", "target-dir"]);
+
+    let output = command.output().expect("execution de l'audit");
+    assert!(
+        output.status.success(),
+        "sortie inattendue: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let audit_dir = workspace.join(".audit");
+    let mut report_paths = fs::read_dir(&audit_dir)
+        .expect("lecture du dossier .audit")
+        .map(|entry| entry.expect("entree valide").path())
+        .collect::<Vec<_>>();
+    report_paths.sort();
+    assert_eq!(report_paths.len(), 1, "un seul audit doit etre genere");
+
+    let report = fs::read_to_string(&report_paths[0]).expect("lecture de l'audit genere");
+    assert!(report.contains("fake final message"));
+
+    let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
+    assert!(logged.contains("$rust-refactor-audit"));
+    assert!(logged.contains(&format!("cwd={}", normalize_path(&workspace))));
 
     let _ = fs::remove_dir_all(workspace);
 }

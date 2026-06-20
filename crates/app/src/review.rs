@@ -2,66 +2,15 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::artifact_subject;
 use crate::cli::ParseOutcome;
 use crate::service_command::{
     self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
     ServiceCommandOptions,
 };
-use crate::service_paths::{self, PathRequirement};
+use crate::service_paths;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReviewSubject {
-    Plan,
-    Audit,
-    Implementation,
-}
-
-impl ReviewSubject {
-    pub fn as_cli_value(self) -> &'static str {
-        match self {
-            Self::Plan => "plan",
-            Self::Audit => "audit",
-            Self::Implementation => "implementation",
-        }
-    }
-
-    pub(crate) fn artifact_name(self) -> &'static str {
-        match self {
-            Self::Plan => "implementation plan",
-            Self::Audit => "audit report",
-            Self::Implementation => "implementation",
-        }
-    }
-
-    fn review_mode(self) -> &'static str {
-        match self {
-            Self::Plan => "Plan review",
-            Self::Audit => "Audit review",
-            Self::Implementation => "Implementation review",
-        }
-    }
-}
-
-impl std::fmt::Display for ReviewSubject {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_cli_value())
-    }
-}
-
-impl std::str::FromStr for ReviewSubject {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "plan" => Ok(Self::Plan),
-            "audit" => Ok(Self::Audit),
-            "implementation" => Ok(Self::Implementation),
-            _ => Err(format!(
-                "type de review invalide: {value}. Valeurs attendues: plan, audit, implementation"
-            )),
-        }
-    }
-}
+pub use crate::artifact_subject::ReviewSubject;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReviewCommand {
@@ -86,27 +35,7 @@ pub fn resolve_artifact_path(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    let path = service_paths::resolve_existing_path(
-        path,
-        &format!("de review {subject}"),
-        match subject {
-            ReviewSubject::Plan | ReviewSubject::Audit => PathRequirement::File,
-            ReviewSubject::Implementation => PathRequirement::FileOrDirectory,
-        },
-        context,
-    )?;
-
-    match subject {
-        ReviewSubject::Plan | ReviewSubject::Audit if !path.is_file() => Err(format!(
-            "le chemin de review {subject} doit etre un fichier: {}",
-            path.display()
-        )),
-        ReviewSubject::Implementation if !path.is_file() && !path.is_dir() => Err(format!(
-            "le chemin de review implementation doit etre un fichier ou un dossier: {}",
-            path.display()
-        )),
-        _ => Ok(path),
-    }
+    artifact_subject::resolve_artifact_path(subject, path, context)
 }
 
 pub fn build_prompt(
@@ -128,7 +57,11 @@ pub fn build_prompt(
         ),
         subject.artifact_name(),
         artifact_path.display(),
-        subject.review_mode(),
+        match subject {
+            ReviewSubject::Plan => "Plan review",
+            ReviewSubject::Audit => "Audit review",
+            ReviewSubject::Implementation => "Implementation review",
+        },
         workspace_root.display(),
         output_dir.display()
     )
@@ -157,7 +90,11 @@ pub fn run(
 pub fn run_silently(
     command: &ReviewCommand,
 ) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(&command.service, REVIEW_DESCRIPTOR, save_review)
+    service_command::execute_service_command_silently(
+        &command.service,
+        REVIEW_DESCRIPTOR,
+        save_review,
+    )
 }
 
 pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
@@ -181,8 +118,11 @@ pub fn parse_args_for_context(
         "review",
         |value| value.parse(),
     )?;
-    let parse_context =
-        service_command::prepare_parse_context_for_context(&common, REVIEW_DESCRIPTOR, context.clone());
+    let parse_context = service_command::prepare_parse_context_for_context(
+        &common,
+        REVIEW_DESCRIPTOR,
+        context.clone(),
+    );
     let workspace_root = parse_context.workspace_root.clone();
     let artifact_path = resolve_artifact_path(subject, artifact_path, &parse_context.context)
         .map_err(ParseOutcome::Error)?;

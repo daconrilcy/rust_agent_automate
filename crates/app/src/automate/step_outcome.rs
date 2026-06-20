@@ -20,24 +20,6 @@ struct StepCommandSpec {
     outcome_path: PathBuf,
 }
 
-struct CurrentDirGuard {
-    previous: PathBuf,
-}
-
-impl CurrentDirGuard {
-    fn change_to(path: &Path) -> io::Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(normalize_working_dir(path))?;
-        Ok(Self { previous })
-    }
-}
-
-impl Drop for CurrentDirGuard {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.previous);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkflowStepOutcome {
     pub(crate) status_code: Option<i32>,
@@ -179,15 +161,15 @@ fn execute_step_command(spec: &StepCommandSpec) -> io::Result<std::process::Outp
 fn execute_service_step_in_process(spec: &StepCommandSpec) -> io::Result<StepExecution> {
     let context = ExecutionContext::from_workspace_root(spec.workspace_root.clone())
         .with_output_root(spec.current_dir.clone());
-    let _guard = CurrentDirGuard::change_to(&spec.current_dir)?;
-    let dispatch = crate::command_registry::parse_service_subcommand_for_context(&spec.args, &context)
-        .ok_or_else(|| {
-            io::Error::other(format!(
-                "l'etape automate '{}' n'est pas une commande de service prise en charge",
-                spec.args.first().cloned().unwrap_or_default()
-            ))
-        })?
-        .map_err(|error| io::Error::other(format!("echec du parseur interne: {error:?}")))?;
+    let dispatch =
+        crate::command_registry::parse_service_subcommand_for_context(&spec.args, &context)
+            .ok_or_else(|| {
+                io::Error::other(format!(
+                    "l'etape automate '{}' n'est pas une commande de service prise en charge",
+                    spec.args.first().cloned().unwrap_or_default()
+                ))
+            })?
+            .map_err(|error| io::Error::other(format!("echec du parseur interne: {error:?}")))?;
 
     match dispatch.execute_silently() {
         Ok(report) => Ok(step_execution_from_report(report)),
@@ -222,44 +204,13 @@ fn step_execution_from_report(report: CompletedReport) -> StepExecution {
 }
 
 fn step_execution_from_report_failure(command_name: &str, failure: ReportFailure) -> StepExecution {
-    match failure {
-        ReportFailure::CodexCall(error) => StepExecution {
-            status_code: Some(1),
-            success: false,
-            stdout: String::new(),
-            stderr: error,
-            command_outcome: None,
-        },
-        ReportFailure::MissingFinalMessage {
-            status_code,
-            stdout,
-            stderr,
-        } => StepExecution {
-            status_code: normalized_status_code(Some(status_code)),
-            success: false,
-            stdout,
-            stderr,
-            command_outcome: Some(CommandOutcome {
-                command_name: command_name.to_string(),
-                status_code: Some(status_code),
-                final_message_present: false,
-                artifact_path: None,
-                clean: None,
-            }),
-        },
-        ReportFailure::Save { clean, error, .. } => StepExecution {
-            status_code: Some(1),
-            success: false,
-            stdout: String::new(),
-            stderr: error,
-            command_outcome: Some(CommandOutcome {
-                command_name: command_name.to_string(),
-                status_code: Some(1),
-                final_message_present: true,
-                artifact_path: None,
-                clean,
-            }),
-        },
+    let failure = crate::reporting::command_failure_outcome(command_name, &failure);
+    StepExecution {
+        status_code: normalized_status_code(Some(failure.status_code)),
+        success: false,
+        stdout: failure.stdout,
+        stderr: failure.stderr,
+        command_outcome: failure.command_outcome,
     }
 }
 
@@ -279,9 +230,9 @@ fn temp_outcome_file_path() -> PathBuf {
 // Child steps own process execution and publish their transport payload through
 // `RUST_AGENT_COMMAND_OUTCOME_PATH`.
 //
-// This module decodes that payload into `CommandOutcome`; workflow-facing
-// shaping happens in `command_outcome_for_step`, and later artifact
-// normalization remains the runner's responsibility.
+// This module stops at transport decoding and step-level success shaping. The
+// workflow runner owns workspace-local artifact validation and loop-policy
+// decisions, so that layer can stay independent from the JSON transport shape.
 fn decode_command_outcome(path: &Path) -> io::Result<Option<CommandOutcome>> {
     let content = match fs::read(path) {
         Ok(content) => content,
@@ -303,15 +254,6 @@ fn cargo_target_dir_for_context(context: &RunContext, process_id: u32) -> PathBu
 
 fn child_current_dir(context: &RunContext) -> &Path {
     &context.workspace_root
-}
-
-fn normalize_working_dir(path: &Path) -> PathBuf {
-    let text = path.display().to_string();
-    if let Some(stripped) = text.strip_prefix(r"\\?\") {
-        PathBuf::from(stripped)
-    } else {
-        path.to_path_buf()
-    }
 }
 
 #[cfg(test)]
@@ -407,5 +349,31 @@ mod tests {
             Some(PathBuf::from("C:\\repo\\.audit\\audit.md"))
         );
         assert_eq!(outcome.clean, Some(true));
+    }
+
+    #[test]
+    fn report_failure_conversion_reuses_reporting_failure_outcome_mapping() {
+        let execution = step_execution_from_report_failure(
+            "implementation-audit",
+            ReportFailure::Save {
+                message: "rapport".to_string(),
+                clean: Some(true),
+                error: "disk full".to_string(),
+            },
+        );
+
+        assert_eq!(execution.status_code, Some(1));
+        assert!(!execution.success);
+        assert_eq!(execution.stderr, "disk full");
+        assert_eq!(
+            execution.command_outcome,
+            Some(CommandOutcome {
+                command_name: "implementation-audit".to_string(),
+                status_code: Some(1),
+                final_message_present: true,
+                artifact_path: None,
+                clean: Some(true),
+            })
+        );
     }
 }

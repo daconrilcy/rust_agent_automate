@@ -1,4 +1,5 @@
 mod artifact;
+mod artifact_subject;
 mod audit;
 pub mod automate;
 pub mod cli;

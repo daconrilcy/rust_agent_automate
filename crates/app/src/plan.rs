@@ -114,8 +114,11 @@ pub fn parse_args_for_context(
         }
     })?;
 
-    let parse_context =
-        service_command::prepare_parse_context_for_context(&common, PLAN_DESCRIPTOR, context.clone());
+    let parse_context = service_command::prepare_parse_context_for_context(
+        &common,
+        PLAN_DESCRIPTOR,
+        context.clone(),
+    );
     let workspace_root = parse_context.workspace_root.clone();
     let audit_path = resolve_audit_file(audit_path.ok_or_else(|| {
         ParseOutcome::Error(

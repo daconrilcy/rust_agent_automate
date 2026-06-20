@@ -75,7 +75,11 @@ pub fn run(
 pub fn run_silently(
     command: &AuditCommand,
 ) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
-    service_command::execute_service_command_silently(&command.service, AUDIT_DESCRIPTOR, save_report)
+    service_command::execute_service_command_silently(
+        &command.service,
+        AUDIT_DESCRIPTOR,
+        save_report,
+    )
 }
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
@@ -108,8 +112,11 @@ pub fn parse_args_for_context(
         ))),
     })?;
 
-    let parse_context =
-        service_command::prepare_parse_context_for_context(&common, AUDIT_DESCRIPTOR, context.clone());
+    let parse_context = service_command::prepare_parse_context_for_context(
+        &common,
+        AUDIT_DESCRIPTOR,
+        context.clone(),
+    );
     let workspace_root = parse_context.workspace_root.clone();
     let target_dir = resolve_target_dir(
         target_dir.unwrap_or_else(|| workspace_root.clone()),
@@ -134,6 +141,22 @@ pub fn parse_args_for_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_mentions_skill_and_paths() {
+        let workspace = Path::new("C:\\dev\\rust_agent");
+        let target = Path::new("C:\\dev\\rust_agent\\crates\\app");
+        let output_dir = Path::new("C:\\dev\\rust_agent\\.audit");
+
+        let prompt = build_prompt(workspace, target, output_dir);
+
+        assert!(prompt.contains("$rust-refactor-audit"));
+        assert!(prompt.contains("central Codex skill named rust-refactor-audit"));
+        assert!(prompt.contains("references/audit-rubric.md"));
+        assert!(prompt.contains("C:\\dev\\rust_agent\\crates\\app"));
+        assert!(prompt.contains("C:\\dev\\rust_agent\\.audit"));
+        assert!(prompt.contains("complete Markdown audit report only"));
+    }
 
     #[test]
     fn resolve_target_dir_rejects_file() {

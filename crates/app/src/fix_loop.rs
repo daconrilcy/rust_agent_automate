@@ -2,8 +2,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::artifact_subject::ReviewSubject;
 use crate::cli::ParseOutcome;
-use crate::review::{self, ReviewSubject};
 use crate::service_command::{
     self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
     ServiceCommandOptions,
@@ -32,7 +32,7 @@ pub fn resolve_artifact_path(
     path: PathBuf,
     context: &crate::service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    review::resolve_artifact_path(kind, path, context)
+    crate::artifact_subject::resolve_artifact_path(kind, path, context)
 }
 
 pub fn build_prompt(

@@ -2,6 +2,11 @@ use crate::cli::{CliCommand, ParseOutcome};
 use crate::service_command::ServiceCommandDispatch;
 use crate::service_paths::ExecutionContext;
 
+type CommandParser = fn(&[String], Option<&ExecutionContext>) -> Result<CliCommand, ParseOutcome>;
+type ServiceParser<T> = fn(&[String], &ExecutionContext) -> Result<T, ParseOutcome>;
+type ServiceParserDefault<T> = fn(&[String]) -> Result<T, ParseOutcome>;
+type ServiceWrap<T> = fn(T) -> ServiceCommandDispatch;
+
 #[derive(Debug, Clone, Copy)]
 pub struct CommandSpec {
     pub name: &'static str,
@@ -9,10 +14,12 @@ pub struct CommandSpec {
     pub accepts_codex_options: bool,
     pub usage: &'static [&'static str],
     pub examples: &'static [&'static str],
-    pub parser: Option<fn(&[String], Option<&ExecutionContext>) -> Result<CliCommand, ParseOutcome>>,
+    pub parser: Option<CommandParser>,
 }
 
-pub const DIRECT_RUN_USAGE: &[&str] = &[r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]"#];
+pub const DIRECT_RUN_USAGE: &[&str] = &[
+    r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]"#,
+];
 
 pub const DIRECT_RUN_EXAMPLES: &[&str] = &[
     r#"cargo run -q -p app -- --model gpt-5.4 --reasoning low"#,
@@ -34,13 +41,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- audit --output-dir .audit",
             "cargo run -q -p app -- audit --timeout-seconds 120",
         ],
-        parser: Some(|args, context| {
-            let command = match context {
-                Some(context) => crate::audit::parse_args_for_context(args, context)?,
-                None => crate::audit::parse_args(args)?,
-            };
-            Ok(CliCommand::Service(ServiceCommandDispatch::Audit(command)))
-        }),
+        parser: Some(parse_audit_command),
     },
     CommandSpec {
         name: "plan",
@@ -53,13 +54,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- plan .audit\\audit-1781887189.md",
             "cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan",
         ],
-        parser: Some(|args, context| {
-            let command = match context {
-                Some(context) => crate::plan::parse_args_for_context(args, context)?,
-                None => crate::plan::parse_args(args)?,
-            };
-            Ok(CliCommand::Service(ServiceCommandDispatch::Plan(command)))
-        }),
+        parser: Some(parse_plan_command),
     },
     CommandSpec {
         name: "implementation-audit",
@@ -73,15 +68,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md",
             "cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app",
         ],
-        parser: Some(|args, context| {
-            let command = match context {
-                Some(context) => crate::implementation_audit::parse_args_for_context(args, context)?,
-                None => crate::implementation_audit::parse_args(args)?,
-            };
-            Ok(CliCommand::Service(
-                ServiceCommandDispatch::ImplementationAudit(command),
-            ))
-        }),
+        parser: Some(parse_implementation_audit_command),
     },
     CommandSpec {
         name: "review",
@@ -95,13 +82,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md",
             "cargo run -q -p app -- review implementation crates\\app",
         ],
-        parser: Some(|args, context| {
-            let command = match context {
-                Some(context) => crate::review::parse_args_for_context(args, context)?,
-                None => crate::review::parse_args(args)?,
-            };
-            Ok(CliCommand::Service(ServiceCommandDispatch::Review(command)))
-        }),
+        parser: Some(parse_review_command),
     },
     CommandSpec {
         name: "fix-loop",
@@ -117,13 +98,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- fix-loop implementation crates\\app",
             "cargo run -q -p app -- loop implementation crates\\app",
         ],
-        parser: Some(|args, context| {
-            let command = match context {
-                Some(context) => crate::fix_loop::parse_args_for_context(args, context)?,
-                None => crate::fix_loop::parse_args(args)?,
-            };
-            Ok(CliCommand::Service(ServiceCommandDispatch::FixLoop(command)))
-        }),
+        parser: Some(parse_fix_loop_command),
     },
     CommandSpec {
         name: "automate",
@@ -131,7 +106,9 @@ pub const COMMANDS: &[CommandSpec] = &[
         accepts_codex_options: false,
         usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
         examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
-        parser: Some(|args, _context| crate::automate::parse_automate_args(args).map(CliCommand::Automate)),
+        parser: Some(|args, _context| {
+            crate::automate::parse_automate_args(args).map(CliCommand::Automate)
+        }),
     },
     CommandSpec {
         name: "refactor-automate",
@@ -193,6 +170,8 @@ pub fn parse_registered_subcommand_for_context(
     args: &[String],
     context: Option<&ExecutionContext>,
 ) -> Option<Result<CliCommand, ParseOutcome>> {
+    // The registry owns name/alias discovery and parser routing only.
+    // Command modules keep their own parse rules and prompt construction.
     let command = canonical_name(args.first().map(String::as_str))?;
 
     COMMANDS
@@ -200,6 +179,85 @@ pub fn parse_registered_subcommand_for_context(
         .find(|spec| spec.name == command)
         .and_then(|spec| spec.parser)
         .map(|parser| parser(&args[1..], context))
+}
+
+fn parse_service_command<T>(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+    parse_for_context: ServiceParser<T>,
+    parse_default: ServiceParserDefault<T>,
+    wrap: ServiceWrap<T>,
+) -> Result<CliCommand, ParseOutcome> {
+    let command = match context {
+        Some(context) => parse_for_context(args, context)?,
+        None => parse_default(args)?,
+    };
+    Ok(CliCommand::Service(wrap(command)))
+}
+
+fn parse_audit_command(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+) -> Result<CliCommand, ParseOutcome> {
+    parse_service_command(
+        args,
+        context,
+        crate::audit::parse_args_for_context,
+        crate::audit::parse_args,
+        ServiceCommandDispatch::Audit,
+    )
+}
+
+fn parse_plan_command(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+) -> Result<CliCommand, ParseOutcome> {
+    parse_service_command(
+        args,
+        context,
+        crate::plan::parse_args_for_context,
+        crate::plan::parse_args,
+        ServiceCommandDispatch::Plan,
+    )
+}
+
+fn parse_implementation_audit_command(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+) -> Result<CliCommand, ParseOutcome> {
+    parse_service_command(
+        args,
+        context,
+        crate::implementation_audit::parse_args_for_context,
+        crate::implementation_audit::parse_args,
+        ServiceCommandDispatch::ImplementationAudit,
+    )
+}
+
+fn parse_review_command(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+) -> Result<CliCommand, ParseOutcome> {
+    parse_service_command(
+        args,
+        context,
+        crate::review::parse_args_for_context,
+        crate::review::parse_args,
+        ServiceCommandDispatch::Review,
+    )
+}
+
+fn parse_fix_loop_command(
+    args: &[String],
+    context: Option<&ExecutionContext>,
+) -> Result<CliCommand, ParseOutcome> {
+    parse_service_command(
+        args,
+        context,
+        crate::fix_loop::parse_args_for_context,
+        crate::fix_loop::parse_args,
+        ServiceCommandDispatch::FixLoop,
+    )
 }
 
 pub fn parse_service_subcommand_for_context(

@@ -5,8 +5,8 @@ use std::time::Duration;
 use crate::cli::ParseOutcome;
 use crate::reporting;
 use crate::service_command::{
-    self, ParsedRequiredPath, PreparedServiceCommand, ServiceCommandDescriptor,
-    ServiceCommandOptions,
+    self, ParsedRequiredPath, PreparedServiceCommand, RequiredPathParseSpec,
+    ServiceCommandDescriptor, ServiceCommandOptions,
 };
 use crate::service_paths::{self, PathRequirement};
 
@@ -141,13 +141,15 @@ pub fn parse_args_for_context(
     } = service_command::parse_required_path_with_optional_named_path(
         args,
         &mut common,
-        "--plan",
-        "--implementation",
-        "implementation-audit",
-        "un plan",
-        "cargo run -p app -- implementation-audit .plan\\plan.md",
-        "le plan d'implementation a deja ete fourni",
-        "le chemin d'implementation a deja ete fourni",
+        RequiredPathParseSpec {
+            required_option_name: "--plan",
+            optional_option_name: "--implementation",
+            command_name: "implementation-audit",
+            required_label: "un plan",
+            required_example: "cargo run -p app -- implementation-audit .plan\\plan.md",
+            duplicate_required_message: "le plan d'implementation a deja ete fourni",
+            duplicate_optional_message: "le chemin d'implementation a deja ete fourni",
+        },
     )?;
     let parse_context = service_command::prepare_parse_context_for_context(
         &common,

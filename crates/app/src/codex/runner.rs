@@ -1,47 +1,17 @@
-use std::fs;
-use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use super::discovery;
 use super::request::{CodexMode, CodexRequest};
+#[path = "runner/capture.rs"]
+mod capture;
+#[path = "runner/monitor.rs"]
+mod monitor;
 
-struct ExecCapturePaths {
-    output_file: PathBuf,
-    stderr_file: Option<PathBuf>,
-}
-
-impl ExecCapturePaths {
-    fn for_exec_run(verbose: bool) -> Self {
-        Self {
-            output_file: temp_output_file_path(),
-            stderr_file: (!verbose).then(temp_stderr_file_path),
-        }
-    }
-
-    fn read_final_message(&self) -> io::Result<Option<String>> {
-        read_final_message(&self.output_file)
-    }
-
-    fn read_final_message_if_ready(&self) -> io::Result<Option<String>> {
-        read_final_message_if_ready(&self.output_file)
-    }
-
-    fn read_stderr(&self) -> io::Result<String> {
-        read_optional_file(self.stderr_file.as_deref())
-    }
-
-    fn read_stderr_without_removing(&self) -> io::Result<String> {
-        read_optional_file_without_removing(self.stderr_file.as_deref())
-    }
-
-    fn timeout_diagnostics(&self) -> String {
-        timeout_diagnostics(&self.output_file, self.stderr_file.as_deref())
-    }
-}
+use capture::ExecCapturePaths;
 
 #[derive(Debug)]
 pub struct RunResult {
@@ -58,6 +28,9 @@ pub fn build_command(
 ) -> Command {
     let mut command = Command::new(executable);
     command.args(base_command_args(request, inside_git_repository));
+    if let Some(working_dir) = &request.working_dir {
+        command.current_dir(working_dir);
+    }
     command.env_remove(crate::reporting::COMMAND_OUTCOME_PATH_ENV);
     discovery::configure_child_path(&mut command);
     command
@@ -70,7 +43,7 @@ pub fn run_exec(
 ) -> io::Result<RunResult> {
     let capture = ExecCapturePaths::for_exec_run(true);
 
-    append_exec_capture_args(&mut command, &capture.output_file, use_color_never);
+    append_exec_capture_args(&mut command, capture.output_file(), use_color_never);
 
     if verbose {
         let status = command.status()?;
@@ -105,22 +78,28 @@ pub fn run_exec_until_final_message(
 ) -> io::Result<RunResult> {
     let capture = ExecCapturePaths::for_exec_run(verbose);
 
-    configure_exec_child(&mut command, &capture, verbose, use_color_never)?;
+    monitor::configure_exec_child(
+        &mut command,
+        &capture,
+        verbose,
+        use_color_never,
+        append_exec_capture_args,
+    )?;
 
     let mut child = command.spawn()?;
     let start = Instant::now();
 
     loop {
-        if let Some(result) = finish_on_final_message(&mut child, &capture)? {
+        if let Some(result) = monitor::finish_on_final_message(&mut child, &capture)? {
             return Ok(result);
         }
 
-        if let Some(result) = finish_on_process_exit(&mut child, &capture)? {
+        if let Some(result) = monitor::finish_on_process_exit(&mut child, &capture)? {
             return Ok(result);
         }
 
         if start.elapsed() >= timeout {
-            return Err(timeout_error(&mut child, &capture, timeout)?);
+            return Err(monitor::timeout_error(&mut child, &capture, timeout)?);
         }
 
         thread::sleep(Duration::from_millis(200));
@@ -173,237 +152,12 @@ pub(crate) fn append_exec_capture_args(
     }
 }
 
-fn configure_exec_child(
-    command: &mut Command,
-    capture: &ExecCapturePaths,
-    verbose: bool,
-    use_color_never: bool,
-) -> io::Result<()> {
-    append_exec_capture_args(command, &capture.output_file, use_color_never);
-    command.stdin(Stdio::null());
-
-    if verbose {
-        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    } else {
-        let stderr = File::create(
-            capture
-                .stderr_file
-                .as_ref()
-                .expect("stderr_file is set for non-verbose exec"),
-        )?;
-        command.stdout(Stdio::null()).stderr(Stdio::from(stderr));
-    }
-
-    Ok(())
-}
-
-fn finish_on_final_message(
-    child: &mut Child,
-    capture: &ExecCapturePaths,
-) -> io::Result<Option<RunResult>> {
-    let Some(final_message) = capture.read_final_message_if_ready()? else {
-        return Ok(None);
-    };
-    let status = wait_or_terminate(child, Duration::from_secs(2))?;
-    let stderr = capture.read_stderr()?;
-
-    Ok(Some(RunResult {
-        status,
-        final_message: Some(final_message),
-        stdout: String::new(),
-        stderr,
-    }))
-}
-
-fn finish_on_process_exit(
-    child: &mut Child,
-    capture: &ExecCapturePaths,
-) -> io::Result<Option<RunResult>> {
-    let Some(status) = child.try_wait()? else {
-        return Ok(None);
-    };
-    let final_message = capture.read_final_message()?;
-    let stderr = capture.read_stderr()?;
-
-    Ok(Some(RunResult {
-        status,
-        final_message,
-        stdout: String::new(),
-        stderr,
-    }))
-}
-
-fn timeout_error(
-    child: &mut Child,
-    capture: &ExecCapturePaths,
-    timeout: Duration,
-) -> io::Result<io::Error> {
-    let _ = terminate_process_tree(child);
-    let _ = child.wait();
-    let stderr = capture.read_stderr_without_removing().unwrap_or_default();
-    let stderr = tail_for_error(&stderr, 4_000);
-    let diagnostics = capture.timeout_diagnostics();
-    let detail = if stderr.trim().is_empty() {
-        diagnostics
-    } else {
-        format!("{diagnostics}\nDerniere sortie stderr de codex:\n{stderr}")
-    };
-
-    Ok(io::Error::new(
-        io::ErrorKind::TimedOut,
-        format!(
-            "codex n'a pas produit de message final dans les {} secondes{detail}",
-            timeout.as_secs(),
-        ),
-    ))
-}
-
-fn wait_or_terminate(child: &mut Child, grace_period: Duration) -> io::Result<ExitStatus> {
-    let start = Instant::now();
-
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-
-        if start.elapsed() >= grace_period {
-            let _ = terminate_process_tree(child);
-            return child.wait();
-        }
-
-        thread::sleep(Duration::from_millis(50));
-    }
-}
-
-pub(crate) fn read_final_message(path: &Path) -> io::Result<Option<String>> {
-    read_final_message_inner(path, true)
-}
-
-fn read_final_message_if_ready(path: &Path) -> io::Result<Option<String>> {
-    read_final_message_inner(path, false)
-}
-
-fn read_final_message_inner(path: &Path, remove_if_empty: bool) -> io::Result<Option<String>> {
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        if remove_if_empty {
-            let _ = fs::remove_file(path);
-        }
-        Ok(None)
-    } else {
-        let _ = fs::remove_file(path);
-        Ok(Some(trimmed.to_string()))
-    }
-}
-
-fn temp_output_file_path() -> PathBuf {
-    temp_codex_file_path("last_message")
-}
-
-fn temp_stderr_file_path() -> PathBuf {
-    temp_codex_file_path("stderr")
-}
-
-fn temp_codex_file_path(kind: &str) -> PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-
-    std::env::temp_dir().join(format!(
-        "rust_agent_codex_{}_{}_{}.txt",
-        std::process::id(),
-        timestamp,
-        kind
-    ))
-}
-
-fn read_optional_file(path: Option<&Path>) -> io::Result<String> {
-    let Some(path) = path else {
-        return Ok(String::new());
-    };
-
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(error),
-    };
-
-    let _ = fs::remove_file(path);
-    Ok(content)
-}
-
-fn read_optional_file_without_removing(path: Option<&Path>) -> io::Result<String> {
-    let Some(path) = path else {
-        return Ok(String::new());
-    };
-
-    match fs::read_to_string(path) {
-        Ok(content) => Ok(content),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error),
-    }
-}
-
-fn timeout_diagnostics(output_file: &Path, stderr_file: Option<&Path>) -> String {
-    let mut message = format!(
-        "\nDiagnostics conserves pour inspection:\n- fichier message final: {}",
-        output_file.display()
-    );
-
-    if let Some(stderr_file) = stderr_file {
-        message.push_str(&format!(
-            "\n- fichier stderr codex: {}",
-            stderr_file.display()
-        ));
-    }
-
-    message
-}
-
-fn tail_for_error(content: &str, max_chars: usize) -> String {
-    let char_count = content.chars().count();
-
-    if char_count <= max_chars {
-        return content.to_string();
-    }
-
-    let tail = content
-        .chars()
-        .skip(char_count.saturating_sub(max_chars))
-        .collect::<String>();
-
-    format!("...{tail}")
-}
-
-fn terminate_process_tree(child: &mut Child) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        child.kill()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::codex::{CodexMode, CodexRequest, ReasoningEffort};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn interactive_mode_builds_minimal_arguments() {
@@ -537,6 +291,25 @@ mod tests {
     }
 
     #[test]
+    fn build_command_uses_request_working_directory_when_provided() {
+        let request = CodexRequest::new(
+            "gpt-5.5",
+            ReasoningEffort::Low,
+            CodexMode::Exec,
+            Some("Run tests".to_string()),
+            false,
+        )
+        .with_working_dir(PathBuf::from("C:\\repo\\target"));
+
+        let command = build_command(PathBuf::from("codex"), &request, true);
+
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::path::Path::new("C:\\repo\\target"))
+        );
+    }
+
+    #[test]
     fn read_final_message_returns_none_for_missing_file() {
         let missing = std::env::temp_dir().join(format!(
             "rust_agent_missing_{}.txt",
@@ -546,7 +319,8 @@ mod tests {
                 .unwrap_or_default()
         ));
 
-        let result = read_final_message(&missing).expect("la lecture doit gerer un fichier absent");
+        let result =
+            capture::read_final_message(&missing).expect("la lecture doit gerer un fichier absent");
 
         assert_eq!(result, None);
     }
@@ -563,7 +337,7 @@ mod tests {
 
         fs::write(&path, "  reponse finale  \n").expect("ecriture du fichier temporaire");
 
-        let result = read_final_message(&path).expect("lecture du fichier temporaire");
+        let result = capture::read_final_message(&path).expect("lecture du fichier temporaire");
 
         assert_eq!(result.as_deref(), Some("reponse finale"));
         assert!(!path.exists(), "le fichier temporaire doit etre supprime");
@@ -581,8 +355,8 @@ mod tests {
 
         fs::write(&path, " \n\t ").expect("ecriture du fichier temporaire");
 
-        let result =
-            read_final_message_if_ready(&path).expect("lecture du fichier temporaire vide");
+        let result = capture::read_final_message_if_ready(&path)
+            .expect("lecture du fichier temporaire vide");
 
         assert_eq!(result, None);
         assert!(path.exists(), "le fichier vide doit rester disponible");
@@ -601,7 +375,8 @@ mod tests {
 
         fs::write(&path, "  reponse prete  \n").expect("ecriture du fichier temporaire");
 
-        let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
+        let result =
+            capture::read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
 
         assert_eq!(result.as_deref(), Some("reponse prete"));
         assert!(!path.exists(), "le fichier temporaire doit etre supprime");
@@ -609,7 +384,8 @@ mod tests {
 
     #[test]
     fn timeout_diagnostics_mentions_capture_files() {
-        let message = timeout_diagnostics(Path::new("last.txt"), Some(Path::new("stderr.txt")));
+        let message =
+            capture::timeout_diagnostics(Path::new("last.txt"), Some(Path::new("stderr.txt")));
 
         assert!(message.contains("last.txt"));
         assert!(message.contains("stderr.txt"));

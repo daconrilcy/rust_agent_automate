@@ -23,7 +23,7 @@ pub fn process_exit_code(status_code: Option<i32>) -> i32 {
 
 pub fn run(request: &CodexRequest) -> io::Result<RunResult> {
     let executable = discovery::resolve_codex_executable()?;
-    let inside_git_repository = repo::is_inside_git_repository()?;
+    let inside_git_repository = repo::is_inside_git_repository_at(request.working_dir.as_deref())?;
     let mut command = runner::build_command(executable, request, inside_git_repository);
 
     match request.mode {
@@ -42,7 +42,7 @@ pub fn run(request: &CodexRequest) -> io::Result<RunResult> {
 
 pub fn run_until_final_message(request: &CodexRequest, timeout: Duration) -> io::Result<RunResult> {
     let executable = discovery::resolve_codex_executable()?;
-    let inside_git_repository = repo::is_inside_git_repository()?;
+    let inside_git_repository = repo::is_inside_git_repository_at(request.working_dir.as_deref())?;
     let command = runner::build_command(executable, request, inside_git_repository);
 
     match request.mode {

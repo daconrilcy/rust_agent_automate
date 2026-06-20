@@ -34,6 +34,8 @@ impl CliCommand {
 }
 
 pub fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
+    // CLI routing stops at choosing direct-run versus a registered subcommand.
+    // Subcommand-specific parsing stays in the registry and service modules.
     if let Some(result) = command_registry::parse_registered_subcommand(args) {
         return result;
     }
@@ -159,12 +161,7 @@ fn run_service_command(
 }
 
 fn service_command_exit_code(error: &crate::reporting::ReportFailure) -> i32 {
-    match error {
-        crate::reporting::ReportFailure::MissingFinalMessage { status_code, .. } => {
-            crate::codex::process_exit_code(Some(*status_code))
-        }
-        _ => 1,
-    }
+    crate::reporting::command_failure_exit_code(error)
 }
 
 fn run_request(request: &CodexRequest) -> i32 {

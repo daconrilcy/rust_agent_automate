@@ -13,8 +13,10 @@ pub const COMMAND_OUTCOME_PATH_ENV: &str = "RUST_AGENT_COMMAND_OUTCOME_PATH";
 pub struct CommandOutcome {
     // Transport payload emitted by service commands for automation.
     //
-    // The child command reports raw completion facts here; workflow automation
-    // later normalizes artifact paths and interprets `clean` for loop stopping.
+    // Reporting owns normalization from Codex/report failures into these raw
+    // completion facts. Workflow automation consumes the payload later,
+    // validates workspace-local artifact paths, and interprets `clean` for
+    // loop stopping without re-deriving reporting semantics.
     pub command_name: String,
     pub status_code: Option<i32>,
     pub final_message_present: bool,
@@ -50,6 +52,14 @@ pub enum ReportFailure {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureOutcome {
+    pub status_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub command_outcome: Option<CommandOutcome>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompletedReport {
     pub status_code: i32,
@@ -75,14 +85,8 @@ pub fn finalize_report(
     result: codex::RunResult,
     spec: &ReportSpec<'_>,
 ) -> Result<CompletedReport, ReportFailure> {
-    let Some(message) = result.final_message else {
-        let outcome = CommandOutcome {
-            command_name: spec.command_name.to_string(),
-            status_code: result.status.code(),
-            final_message_present: false,
-            artifact_path: None,
-            clean: None,
-        };
+    let Some(message) = result.final_message.as_ref() else {
+        let outcome = build_command_outcome(spec, &result, false, None, None);
         let _ = write_command_outcome_if_requested(&outcome);
 
         return Err(ReportFailure::MissingFinalMessage {
@@ -92,43 +96,47 @@ pub fn finalize_report(
         });
     };
 
-    let clean = spec.clean_detector.map(|detector| detector(&message));
-    match (spec.save)(spec.output_dir, &message) {
+    let clean = spec.clean_detector.map(|detector| detector(message));
+    match (spec.save)(spec.output_dir, message) {
         Ok(path) => {
-            let outcome = CommandOutcome {
-                command_name: spec.command_name.to_string(),
-                status_code: result.status.code(),
-                final_message_present: true,
-                artifact_path: Some(path.clone()),
-                clean,
-            };
+            let outcome = build_command_outcome(spec, &result, true, Some(path.clone()), clean);
             let _ = write_command_outcome_if_requested(&outcome);
 
             Ok(CompletedReport {
                 status_code: result.status.code().unwrap_or(1),
                 stdout: result.stdout,
                 stderr: result.stderr,
-                message,
+                message: message.to_string(),
                 saved_path: path,
                 outcome,
             })
         }
         Err(error) => {
-            let outcome = CommandOutcome {
-                command_name: spec.command_name.to_string(),
-                status_code: result.status.code(),
-                final_message_present: true,
-                artifact_path: None,
-                clean,
-            };
+            let outcome = build_command_outcome(spec, &result, true, None, clean);
             let _ = write_command_outcome_if_requested(&outcome);
 
             Err(ReportFailure::Save {
-                message,
+                message: message.to_string(),
                 clean,
                 error: error.to_string(),
             })
         }
+    }
+}
+
+fn build_command_outcome(
+    spec: &ReportSpec<'_>,
+    result: &codex::RunResult,
+    final_message_present: bool,
+    artifact_path: Option<PathBuf>,
+    clean: Option<bool>,
+) -> CommandOutcome {
+    CommandOutcome {
+        command_name: spec.command_name.to_string(),
+        status_code: result.status.code(),
+        final_message_present,
+        artifact_path,
+        clean,
     }
 }
 
@@ -163,6 +171,54 @@ fn print_failure_details(stdout: &str, stderr: &str) {
 
     if !stdout.is_empty() {
         eprintln!("{stdout}");
+    }
+}
+
+pub fn command_failure_exit_code(error: &ReportFailure) -> i32 {
+    match error {
+        ReportFailure::MissingFinalMessage { status_code, .. } => {
+            crate::codex::process_exit_code(Some(*status_code))
+        }
+        _ => 1,
+    }
+}
+
+pub fn command_failure_outcome(command_name: &str, error: &ReportFailure) -> FailureOutcome {
+    match error {
+        ReportFailure::CodexCall(error) => FailureOutcome {
+            status_code: 1,
+            stdout: String::new(),
+            stderr: error.clone(),
+            command_outcome: None,
+        },
+        ReportFailure::MissingFinalMessage {
+            status_code,
+            stdout,
+            stderr,
+        } => FailureOutcome {
+            status_code: *status_code,
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            command_outcome: Some(CommandOutcome {
+                command_name: command_name.to_string(),
+                status_code: Some(*status_code),
+                final_message_present: false,
+                artifact_path: None,
+                clean: None,
+            }),
+        },
+        ReportFailure::Save { clean, error, .. } => FailureOutcome {
+            status_code: 1,
+            stdout: String::new(),
+            stderr: error.clone(),
+            command_outcome: Some(CommandOutcome {
+                command_name: command_name.to_string(),
+                status_code: Some(1),
+                final_message_present: true,
+                artifact_path: None,
+                clean: *clean,
+            }),
+        },
     }
 }
 
@@ -214,7 +270,10 @@ pub fn render_report_failure(failure: &ReportFailure, spec: &ReportSpec<'_>) -> 
             }
         }
         ReportFailure::Save { error, .. } => {
-            format!("echec lors de l'enregistrement du {}: {error}", spec.saved_label)
+            format!(
+                "echec lors de l'enregistrement du {}: {error}",
+                spec.saved_label
+            )
         }
     }
 }
@@ -398,5 +457,55 @@ mod tests {
         }
 
         let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn command_failure_outcome_preserves_missing_final_message_state() {
+        let failure = ReportFailure::MissingFinalMessage {
+            status_code: 7,
+            stdout: "stdout".to_string(),
+            stderr: "stderr".to_string(),
+        };
+
+        let outcome = command_failure_outcome("audit", &failure);
+
+        assert_eq!(outcome.status_code, 7);
+        assert_eq!(outcome.stdout, "stdout");
+        assert_eq!(outcome.stderr, "stderr");
+        assert_eq!(
+            outcome.command_outcome,
+            Some(CommandOutcome {
+                command_name: "audit".to_string(),
+                status_code: Some(7),
+                final_message_present: false,
+                artifact_path: None,
+                clean: None,
+            })
+        );
+    }
+
+    #[test]
+    fn command_failure_outcome_preserves_save_failure_clean_state() {
+        let failure = ReportFailure::Save {
+            message: "rapport".to_string(),
+            clean: Some(true),
+            error: "disk full".to_string(),
+        };
+
+        let outcome = command_failure_outcome("implementation-audit", &failure);
+
+        assert_eq!(outcome.status_code, 1);
+        assert_eq!(outcome.stdout, "");
+        assert_eq!(outcome.stderr, "disk full");
+        assert_eq!(
+            outcome.command_outcome,
+            Some(CommandOutcome {
+                command_name: "implementation-audit".to_string(),
+                status_code: Some(1),
+                final_message_present: true,
+                artifact_path: None,
+                clean: Some(true),
+            })
+        );
     }
 }

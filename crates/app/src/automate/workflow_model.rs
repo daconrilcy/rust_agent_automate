@@ -70,17 +70,12 @@ pub struct WorkflowStep {
     pub timeout_seconds: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 pub enum WorkflowStepKind {
     ServiceCommand,
     NestedCommand,
+    #[default]
     DirectRun,
-}
-
-impl Default for WorkflowStepKind {
-    fn default() -> Self {
-        Self::DirectRun
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

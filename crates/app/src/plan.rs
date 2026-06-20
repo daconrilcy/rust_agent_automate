@@ -29,7 +29,7 @@ pub fn resolve_audit_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "audit", PathRequirement::File, &context)
+    service_paths::resolve_existing_path(path, "audit", PathRequirement::File, context)
         .map_err(|error| error.replace("le chemin audit", "le chemin d'audit"))
 }
 
@@ -55,7 +55,9 @@ pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     artifact::save_timestamped_markdown(output_dir, "plan", content)
 }
 
-pub fn run(command: &PlanCommand) {
+pub fn run(
+    command: &PlanCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     service_command::execute_service_command(
         &command.service,
         PLAN_DESCRIPTOR,
@@ -65,7 +67,7 @@ pub fn run(command: &PlanCommand) {
             command.service.timeout.as_secs()
         ),
         save_plan,
-    );
+    )
 }
 
 pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {

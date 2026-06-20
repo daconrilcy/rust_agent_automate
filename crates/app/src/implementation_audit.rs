@@ -36,7 +36,7 @@ pub fn resolve_plan_file(
         path,
         "plan d'implementation",
         PathRequirement::File,
-        &context,
+        context,
     )
 }
 
@@ -48,7 +48,7 @@ pub fn resolve_implementation_path(
         path,
         "implementation",
         PathRequirement::FileOrDirectory,
-        &context,
+        context,
     )
 }
 
@@ -93,7 +93,9 @@ pub fn save_audit(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     artifact::save_timestamped_markdown(output_dir, "implementation-audit", content)
 }
 
-pub fn run(command: &ImplementationAuditCommand) {
+pub fn run(
+    command: &ImplementationAuditCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     let scope = command.implementation_path.as_deref().map_or_else(
         || "git diff / workspace".to_string(),
         |path| path.display().to_string(),
@@ -109,7 +111,7 @@ pub fn run(command: &ImplementationAuditCommand) {
             command.service.timeout.as_secs()
         ),
         save_audit,
-    );
+    )
 }
 
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {

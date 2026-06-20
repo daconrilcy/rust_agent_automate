@@ -64,7 +64,9 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     artifact::save_timestamped_markdown(output_dir, "fix-loop", content)
 }
 
-pub fn run(command: &FixLoopCommand) {
+pub fn run(
+    command: &FixLoopCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     service_command::execute_service_command(
         &command.service,
         FIX_LOOP_DESCRIPTOR,
@@ -75,7 +77,7 @@ pub fn run(command: &FixLoopCommand) {
             command.service.timeout.as_secs()
         ),
         save_report,
-    );
+    )
 }
 
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {

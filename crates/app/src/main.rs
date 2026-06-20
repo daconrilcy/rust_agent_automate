@@ -10,11 +10,13 @@ fn main() {
 
     match cli::parse_args(&args) {
         Ok(CliCommand::Run(request)) => run_request(&request),
-        Ok(CliCommand::Audit(request)) => audit::run(&request),
-        Ok(CliCommand::Plan(request)) => plan::run(&request),
-        Ok(CliCommand::ImplementationAudit(request)) => implementation_audit::run(&request),
-        Ok(CliCommand::Review(request)) => review::run(&request),
-        Ok(CliCommand::FixLoop(request)) => fix_loop::run(&request),
+        Ok(CliCommand::Audit(request)) => run_service_command(audit::run(&request)),
+        Ok(CliCommand::Plan(request)) => run_service_command(plan::run(&request)),
+        Ok(CliCommand::ImplementationAudit(request)) => {
+            run_service_command(implementation_audit::run(&request))
+        }
+        Ok(CliCommand::Review(request)) => run_service_command(review::run(&request)),
+        Ok(CliCommand::FixLoop(request)) => run_service_command(fix_loop::run(&request)),
         Ok(CliCommand::Automate(request)) => run_automate(&request),
         Ok(CliCommand::RefactorAutomate(request)) => run_refactor_automate(&request),
         Err(cli::ParseOutcome::Help) => cli::print_help(),
@@ -24,6 +26,24 @@ fn main() {
             cli::print_help();
             process::exit(1);
         }
+    }
+}
+
+fn run_service_command(
+    result: Result<app::reporting::CompletedReport, app::reporting::ReportFailure>,
+) {
+    if let Err(error) = result {
+        let code = service_command_exit_code(&error);
+        process::exit(code);
+    }
+}
+
+fn service_command_exit_code(error: &app::reporting::ReportFailure) -> i32 {
+    match error {
+        app::reporting::ReportFailure::MissingFinalMessage { status_code, .. } => {
+            codex::process_exit_code(Some(*status_code))
+        }
+        _ => 1,
     }
 }
 
@@ -114,5 +134,51 @@ fn run_automate_workflow(
             eprintln!("echec de l'automate: {error}");
             process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service_command_exit_code;
+    use app::reporting::ReportFailure;
+
+    #[test]
+    fn missing_final_message_uses_codex_status_code_mapping() {
+        let code = service_command_exit_code(&ReportFailure::MissingFinalMessage {
+            status_code: 7,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        assert_eq!(code, 7);
+    }
+
+    #[test]
+    fn missing_final_message_without_status_uses_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::MissingFinalMessage {
+            status_code: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn codex_call_failures_exit_with_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::CodexCall("boom".to_string()));
+
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn save_failures_exit_with_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::Save {
+            message: "rapport".to_string(),
+            clean: Some(false),
+            error: "disk full".to_string(),
+        });
+
+        assert_eq!(code, 1);
     }
 }

@@ -92,7 +92,7 @@ pub fn resolve_artifact_path(
             ReviewSubject::Plan | ReviewSubject::Audit => PathRequirement::File,
             ReviewSubject::Implementation => PathRequirement::FileOrDirectory,
         },
-        &context,
+        context,
     )?;
 
     match subject {
@@ -137,7 +137,9 @@ pub fn save_review(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
     artifact::save_timestamped_markdown(output_dir, "review", content)
 }
 
-pub fn run(command: &ReviewCommand) {
+pub fn run(
+    command: &ReviewCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     service_command::execute_service_command(
         &command.service,
         REVIEW_DESCRIPTOR,
@@ -148,7 +150,7 @@ pub fn run(command: &ReviewCommand) {
             command.service.timeout.as_secs()
         ),
         save_review,
-    );
+    )
 }
 
 pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {

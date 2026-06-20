@@ -1,7 +1,6 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +29,7 @@ pub struct ReportSpec<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ReportFailure {
+pub enum ReportFailure {
     CodexCall(String),
     MissingFinalMessage {
         status_code: i32,
@@ -45,69 +44,27 @@ enum ReportFailure {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct CompletedReport {
-    status_code: i32,
-    stdout: String,
-    stderr: String,
-    message: String,
-    saved_path: PathBuf,
-    outcome: CommandOutcome,
+pub struct CompletedReport {
+    pub status_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub message: String,
+    pub saved_path: PathBuf,
+    pub outcome: CommandOutcome,
 }
 
-pub fn run_codex_report(request: &CodexRequest, timeout: Duration, spec: ReportSpec<'_>) {
-    let outcome = codex::run_until_final_message(request, timeout)
-        .map_err(|error| ReportFailure::CodexCall(error.to_string()))
-        .and_then(|result| finalize_report(result, &spec));
+pub fn run_codex_report(
+    request: &CodexRequest,
+    timeout: Duration,
+    spec: ReportSpec<'_>,
+) -> Result<CompletedReport, ReportFailure> {
+    let result = codex::run_until_final_message(request, timeout)
+        .map_err(|error| ReportFailure::CodexCall(error.to_string()))?;
 
-    match outcome {
-        Ok(report) => {
-            if report.status_code != 0 {
-                eprintln!(
-                    "codex a produit un {} mais s'est termine avec le statut {}. Le {} est conserve.",
-                    spec.final_label, report.status_code, spec.saved_label
-                );
-                print_failure_details(&report.stdout, &report.stderr);
-            }
-
-            println!(
-                "{} enregistre dans {}",
-                capitalize(spec.saved_label),
-                report.saved_path.display()
-            );
-            println!();
-            println!("{}", report.message);
-        }
-        Err(ReportFailure::CodexCall(error)) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-            process::exit(1);
-        }
-        Err(ReportFailure::MissingFinalMessage {
-            status_code,
-            stdout,
-            stderr,
-        }) => {
-            if status_code != 0 {
-                print_failure_details(&stdout, &stderr);
-                process::exit(codex::process_exit_code(Some(status_code)));
-            }
-
-            eprintln!(
-                "codex n'a pas retourne de message final pour {}",
-                spec.missing_message_label
-            );
-            process::exit(1);
-        }
-        Err(ReportFailure::Save { error, .. }) => {
-            eprintln!(
-                "echec lors de l'enregistrement du {}: {error}",
-                spec.saved_label
-            );
-            process::exit(1);
-        }
-    }
+    finalize_report(result, &spec)
 }
 
-fn finalize_report(
+pub fn finalize_report(
     result: codex::RunResult,
     spec: &ReportSpec<'_>,
 ) -> Result<CompletedReport, ReportFailure> {
@@ -202,6 +159,52 @@ fn print_failure_details(stdout: &str, stderr: &str) {
     }
 }
 
+pub fn print_completed_report(report: &CompletedReport, spec: &ReportSpec<'_>) {
+    if report.status_code != 0 {
+        eprintln!(
+            "codex a produit un {} mais s'est termine avec le statut {}. Le {} est conserve.",
+            spec.final_label, report.status_code, spec.saved_label
+        );
+        print_failure_details(&report.stdout, &report.stderr);
+    }
+
+    println!(
+        "{} enregistre dans {}",
+        capitalize(spec.saved_label),
+        report.saved_path.display()
+    );
+    println!();
+    println!("{}", report.message);
+}
+
+pub fn print_report_failure(failure: &ReportFailure, spec: &ReportSpec<'_>) {
+    match failure {
+        ReportFailure::CodexCall(error) => {
+            eprintln!("echec lors de l'appel a codex: {error}");
+        }
+        ReportFailure::MissingFinalMessage {
+            status_code,
+            stdout,
+            stderr,
+        } => {
+            if *status_code != 0 {
+                print_failure_details(stdout, stderr);
+            } else {
+                eprintln!(
+                    "codex n'a pas retourne de message final pour {}",
+                    spec.missing_message_label
+                );
+            }
+        }
+        ReportFailure::Save { error, .. } => {
+            eprintln!(
+                "echec lors de l'enregistrement du {}: {error}",
+                spec.saved_label
+            );
+        }
+    }
+}
+
 fn capitalize(value: &str) -> String {
     let mut chars = value.chars();
     match chars.next() {
@@ -231,6 +234,13 @@ mod tests {
             save: save_test_report,
             clean_detector: Some(detect_clean_implementation_audit),
         }
+    }
+
+    fn finalize_test_report(
+        result: RunResult,
+        spec: &ReportSpec<'_>,
+    ) -> Result<CompletedReport, ReportFailure> {
+        finalize_report(result, spec)
     }
 
     fn temp_test_dir(prefix: &str) -> PathBuf {
@@ -275,7 +285,7 @@ mod tests {
     #[test]
     fn finalize_report_persists_message_and_marks_clean() {
         let output_dir = temp_test_dir("report_success");
-        let report = finalize_report(
+        let report = finalize_test_report(
             RunResult {
                 status: std::process::ExitStatus::from_raw(0),
                 final_message: Some(
@@ -303,7 +313,7 @@ mod tests {
     #[test]
     fn finalize_report_preserves_non_zero_status_with_artifact() {
         let output_dir = temp_test_dir("report_non_zero");
-        let report = finalize_report(
+        let report = finalize_test_report(
             RunResult {
                 status: std::process::ExitStatus::from_raw(7),
                 final_message: Some("rapport".to_string()),
@@ -323,7 +333,7 @@ mod tests {
 
     #[test]
     fn finalize_report_reports_missing_final_message() {
-        let error = finalize_report(
+        let error = finalize_test_report(
             RunResult {
                 status: std::process::ExitStatus::from_raw(0),
                 final_message: None,
@@ -349,7 +359,7 @@ mod tests {
         let file_path = temp_test_dir("report_save_failure");
         fs::write(&file_path, "occupied").expect("creation du fichier");
 
-        let error = finalize_report(
+        let error = finalize_test_report(
             RunResult {
                 status: std::process::ExitStatus::from_raw(0),
                 final_message: Some("content".to_string()),

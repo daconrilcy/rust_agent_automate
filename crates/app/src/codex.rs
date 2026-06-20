@@ -16,10 +16,9 @@ pub use request::{
 pub use runner::RunResult;
 
 pub fn process_exit_code(status_code: Option<i32>) -> i32 {
-    match status_code {
-        Some(code @ 0..=255) => code,
-        _ => 1,
-    }
+    status_code
+        .filter(|code| (0..=255).contains(code))
+        .unwrap_or(1)
 }
 
 pub fn run(request: &CodexRequest) -> io::Result<RunResult> {

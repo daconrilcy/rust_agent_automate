@@ -101,11 +101,11 @@ where
             }
         }
         report.completed_cycles = cycle;
-        if let Some(policy) = workflow.loop_policy.as_ref() {
-            if evaluate_clean_stop(policy, &context)? {
-                report.clean_stop = true;
-                break;
-            }
+        if let Some(policy) = workflow.loop_policy.as_ref()
+            && evaluate_clean_stop(policy, &context)?
+        {
+            report.clean_stop = true;
+            break;
         }
     }
 

@@ -54,6 +54,20 @@ pub struct ServiceRunSpec<'a> {
     pub clean_detector: Option<fn(&str) -> bool>,
 }
 
+impl<'a> ServiceRunSpec<'a> {
+    fn report_spec(&self) -> ReportSpec<'a> {
+        ReportSpec {
+            command_name: self.command_name,
+            saved_label: self.saved_label,
+            final_label: self.final_label,
+            missing_message_label: self.missing_message_label,
+            output_dir: self.output_dir,
+            save: self.save,
+            clean_detector: self.clean_detector,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedServiceCommand {
     pub request: CodexRequest,
@@ -168,7 +182,7 @@ pub fn execute_service_command(
     descriptor: ServiceCommandDescriptor<'_>,
     intro: String,
     save: fn(&Path, &str) -> io::Result<PathBuf>,
-) {
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     run_service_command(
         &command.request,
         command.timeout,
@@ -182,24 +196,24 @@ pub fn execute_service_command(
             save,
             clean_detector: descriptor.clean_detector,
         },
-    );
+    )
 }
 
-pub fn run_service_command(request: &CodexRequest, timeout: Duration, spec: ServiceRunSpec<'_>) {
+pub fn run_service_command(
+    request: &CodexRequest,
+    timeout: Duration,
+    spec: ServiceRunSpec<'_>,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     eprintln!("{}", spec.intro);
-    reporting::run_codex_report(
-        request,
-        timeout,
-        ReportSpec {
-            command_name: spec.command_name,
-            saved_label: spec.saved_label,
-            final_label: spec.final_label,
-            missing_message_label: spec.missing_message_label,
-            output_dir: spec.output_dir,
-            save: spec.save,
-            clean_detector: spec.clean_detector,
-        },
-    );
+    let report_spec = spec.report_spec();
+    let result = reporting::run_codex_report(request, timeout, report_spec);
+
+    match &result {
+        Ok(report) => reporting::print_completed_report(report, &spec.report_spec()),
+        Err(error) => reporting::print_report_failure(error, &spec.report_spec()),
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -269,9 +283,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut options = ServiceCommandOptions::new(Duration::from_secs(900));
         parse_with_common_options(&args, &mut options, |index, value| {
-            if index == 0 && value == "audit.md" {
-                Ok(1)
-            } else if value == "--verbose" {
+            if (index == 0 && value == "audit.md") || value == "--verbose" {
                 Ok(1)
             } else {
                 Err(ParseOutcome::Error(format!("unexpected: {value}")))

@@ -53,16 +53,13 @@ pub fn resolve_target_dir(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(
-        path,
-        "dossier cible",
-        PathRequirement::Directory,
-        &context,
-    )
-    .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
+    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
+        .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
 }
 
-pub fn run(command: &AuditCommand) {
+pub fn run(
+    command: &AuditCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
     service_command::execute_service_command(
         &command.service,
         AUDIT_DESCRIPTOR,
@@ -72,7 +69,7 @@ pub fn run(command: &AuditCommand) {
             command.service.timeout.as_secs()
         ),
         save_report,
-    );
+    )
 }
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {

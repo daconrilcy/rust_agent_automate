@@ -44,6 +44,7 @@ fn workflow_chain_persists_and_reuses_artifacts() {
             "PATH",
             common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
         )
+        .env("USERPROFILE", &workspace)
         .env("FAKE_CODEX_LOG", &log_path)
         .args([
             "automate",

@@ -15,6 +15,7 @@ fn codex_discovery_uses_path_lookup() {
             "PATH",
             common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
         )
+        .env("USERPROFILE", &workspace)
         .env("FAKE_CODEX_LOG", &log_path)
         .args(["--mode", "exec", "hello"]);
 
@@ -42,6 +43,7 @@ fn codex_discovery_prefers_codex_cli_path() {
             "PATH",
             common::join_path_dirs([fallback.parent().expect("fallback parent").to_path_buf()]),
         )
+        .env("USERPROFILE", &workspace)
         .env("FAKE_CODEX_LOG", &log_path)
         .env("CODEX_CLI_PATH", &preferred)
         .args(["--mode", "exec", "hello"]);

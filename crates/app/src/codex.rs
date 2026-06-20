@@ -497,20 +497,29 @@ fn resolve_codex_candidate(
 }
 
 fn executable_candidates() -> Vec<PathBuf> {
-    let mut candidates = vec![PathBuf::from("codex.exe"), PathBuf::from("codex")];
+    let user_profile = std::env::var_os("USERPROFILE");
+    let codex_cli_path = std::env::var_os("CODEX_CLI_PATH").map(PathBuf::from);
 
-    if let Some(path) = std::env::var_os("CODEX_CLI_PATH") {
-        candidates.insert(0, PathBuf::from(path));
+    executable_candidates_from_user_profile(user_profile.as_deref().map(Path::new), codex_cli_path)
+}
+
+fn executable_candidates_from_user_profile(
+    user_profile: Option<&Path>,
+    codex_cli_path: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = codex_cli_path {
+        candidates.push(path);
     }
 
-    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
-        let user_profile = PathBuf::from(user_profile);
-
-        candidates.extend(vscode_extension_candidates(&user_profile));
+    if let Some(user_profile) = user_profile {
+        candidates.extend(vscode_extension_candidates(user_profile));
         candidates.push(user_profile.join("AppData\\Roaming\\npm\\codex.exe"));
         candidates.push(user_profile.join("AppData\\Roaming\\npm\\codex.cmd"));
     }
 
+    candidates.extend([PathBuf::from("codex.exe"), PathBuf::from("codex")]);
     candidates.push(PathBuf::from("codex.cmd"));
 
     candidates
@@ -946,6 +955,34 @@ mod tests {
             resolved.to_string_lossy().to_ascii_lowercase(),
             executable.to_string_lossy().to_ascii_lowercase()
         );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn executable_candidates_prefers_vscode_native_executable_before_path_lookup() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rust_agent_codex_candidates_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        let extension_bin =
+            temp_dir.join(".vscode\\extensions\\openai.chatgpt-test\\bin\\windows-x86_64");
+        fs::create_dir_all(&extension_bin).expect("creation du dossier extension");
+        let native_codex = extension_bin.join("codex.exe");
+        fs::write(&native_codex, "fake codex").expect("creation du faux codex natif");
+        fs::write(extension_bin.join("rg.exe"), "fake rg").expect("creation du faux rg");
+
+        let candidates = executable_candidates_from_user_profile(Some(&temp_dir), None);
+
+        assert_eq!(candidates.first(), Some(&native_codex));
+        let path_lookup_position = candidates
+            .iter()
+            .position(|candidate| candidate == Path::new("codex"))
+            .expect("candidat PATH attendu");
+        assert!(path_lookup_position > 0);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

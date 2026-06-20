@@ -160,6 +160,49 @@ pub use workflow_model::{
 #[allow(unused_imports)]
 pub use workflow_runner::run_workflow;
 
+#[derive(Debug)]
+enum AutomateParseError {
+    ParseOutcome(ParseOutcome),
+    WorkflowParse(WorkflowParseError),
+    WorkspaceRoot(crate::service_paths::PathResolutionError),
+    TargetDir(TargetDirResolutionError),
+}
+
+impl From<ParseOutcome> for AutomateParseError {
+    fn from(value: ParseOutcome) -> Self {
+        Self::ParseOutcome(value)
+    }
+}
+
+impl From<WorkflowParseError> for AutomateParseError {
+    fn from(value: WorkflowParseError) -> Self {
+        Self::WorkflowParse(value)
+    }
+}
+
+impl From<crate::service_paths::PathResolutionError> for AutomateParseError {
+    fn from(value: crate::service_paths::PathResolutionError) -> Self {
+        Self::WorkspaceRoot(value)
+    }
+}
+
+impl From<TargetDirResolutionError> for AutomateParseError {
+    fn from(value: TargetDirResolutionError) -> Self {
+        Self::TargetDir(value)
+    }
+}
+
+impl AutomateParseError {
+    fn into_parse_outcome(self) -> ParseOutcome {
+        match self {
+            Self::ParseOutcome(outcome) => outcome,
+            Self::WorkflowParse(error) => ParseOutcome::Error(error.to_string()),
+            Self::WorkspaceRoot(error) => ParseOutcome::Error(error.to_string()),
+            Self::TargetDir(error) => ParseOutcome::Error(error.to_string()),
+        }
+    }
+}
+
 pub(crate) fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
     let Some(first) = rust_command.first().map(String::as_str) else {
         return WorkflowStepKind::DirectRun;
@@ -189,6 +232,10 @@ pub fn resolve_target_dir(
 }
 
 pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
+    parse_automate_args_internal(args).map_err(AutomateParseError::into_parse_outcome)
+}
+
+fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, AutomateParseError> {
     let mut workflow_path: Option<PathBuf> = None;
     let mut prompt_parts: Vec<String> = Vec::new();
     let mut named_workflow = false;
@@ -220,7 +267,8 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
                 Ok(ParseLoopControl::CaptureRest)
             }
         }
-    })?;
+    })
+    .map_err(AutomateParseError::from)?;
 
     if let Some(index) = prompt_start {
         prompt_parts.extend_from_slice(&args[index..]);
@@ -231,11 +279,10 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
             "la commande automate requiert un workflow JSON. Exemple: cargo run -p app -- automate workflow.json \"Objectif\""
                 .to_string(),
         )
-    })?;
-    let workflow =
-        load_workflow(&workflow_path).map_err(|error| ParseOutcome::Error(error.to_string()))?;
-    let workspace_root = service_paths::current_workspace_root()
-        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+    })
+    .map_err(AutomateParseError::from)?;
+    let workflow = load_workflow(&workflow_path)?;
+    let workspace_root = service_paths::current_workspace_root()?;
     let initial_prompt = if prompt_parts.is_empty() {
         String::from("Executer le workflow automate fourni.")
     } else {
@@ -253,6 +300,12 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
 pub fn parse_refactor_automate_args(
     args: &[String],
 ) -> Result<RefactorAutomateCommand, ParseOutcome> {
+    parse_refactor_automate_args_internal(args).map_err(AutomateParseError::into_parse_outcome)
+}
+
+fn parse_refactor_automate_args_internal(
+    args: &[String],
+) -> Result<RefactorAutomateCommand, AutomateParseError> {
     let mut workflow_path: Option<PathBuf> = None;
     let mut target_dir: Option<PathBuf> = None;
     let mut prompt_parts: Vec<String> = Vec::new();
@@ -283,31 +336,26 @@ pub fn parse_refactor_automate_args(
             Err(ParseOutcome::Error(format!("option inconnue: {value}")))
         }
         _ => Ok(ParseLoopControl::CaptureRest),
-    })?;
+    })
+    .map_err(AutomateParseError::from)?;
 
     if let Some(index) = prompt_start {
         prompt_parts.extend_from_slice(&args[index..]);
     }
 
     let workflow = match workflow_path {
-        Some(path) => {
-            load_workflow(&path).map_err(|error| ParseOutcome::Error(error.to_string()))?
-        }
+        Some(path) => load_workflow(&path)?,
         None => default_refactor_workflow(),
     };
-    let launch_workspace_root = service_paths::current_workspace_root()
-        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+    let launch_workspace_root = service_paths::current_workspace_root()?;
     let context =
         service_paths::ExecutionContext::from_workspace_root(launch_workspace_root.clone())
-            .with_output_root(
-                resolve_target_dir(
-                    target_dir.unwrap_or(launch_workspace_root.clone()),
-                    &service_paths::ExecutionContext::from_workspace_root(
-                        launch_workspace_root.clone(),
-                    ),
-                )
-                .map_err(|error| ParseOutcome::Error(error.to_string()))?,
-            );
+            .with_output_root(resolve_target_dir(
+                target_dir.unwrap_or(launch_workspace_root.clone()),
+                &service_paths::ExecutionContext::from_workspace_root(
+                    launch_workspace_root.clone(),
+                ),
+            )?);
     let target_dir = context.output_root().to_path_buf();
     let output_root = context.output_root().to_path_buf();
     let initial_prompt = if prompt_parts.is_empty() {

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen, next_value, scan_args};
+use crate::cli::{ParseOutcome, mark_seen, next_value};
 
 use super::{
     ParsedRequiredPath, ParsedSubjectArtifact, RequiredPathParseSpec, ServiceCommandOptions,
@@ -49,35 +49,43 @@ impl ServiceCommandParseError {
     }
 }
 
+fn parse_outcome(error: ServiceCommandParseError) -> ParseOutcome {
+    error.into_parse_outcome()
+}
+
 fn parse_common_option(
     args: &[String],
     index: usize,
     options: &mut ServiceCommandOptions,
     seen: &mut CommonOptionSeen,
-) -> Result<Option<usize>, ParseOutcome> {
+) -> Result<Option<usize>, ServiceCommandParseError> {
     match args[index].as_str() {
-        "-h" | "--help" => Err(ParseOutcome::Help),
+        "-h" | "--help" => Err(ServiceCommandParseError::Help),
         "--model" => {
-            mark_seen(&mut seen.model, "--model")?;
+            mark_seen(&mut seen.model, "--model").map_err(ServiceCommandParseError::from)?;
             options.model = next_value(args, index, "--model")?.to_owned();
             Ok(Some(2))
         }
         "--reasoning" => {
-            mark_seen(&mut seen.reasoning, "--reasoning")?;
+            mark_seen(&mut seen.reasoning, "--reasoning")
+                .map_err(ServiceCommandParseError::from)?;
             options.reasoning_effort = next_value(args, index, "--reasoning")?
                 .parse()
-                .map_err(ParseOutcome::Error)?;
+                .map_err(ServiceCommandParseError::Message)?;
             Ok(Some(2))
         }
         "--output-dir" => {
-            mark_seen(&mut seen.output_dir, "--output-dir")?;
+            mark_seen(&mut seen.output_dir, "--output-dir")
+                .map_err(ServiceCommandParseError::from)?;
             options.output_dir = Some(PathBuf::from(next_value(args, index, "--output-dir")?));
             Ok(Some(2))
         }
         "--timeout-seconds" => {
-            mark_seen(&mut seen.timeout, "--timeout-seconds")?;
+            mark_seen(&mut seen.timeout, "--timeout-seconds")
+                .map_err(ServiceCommandParseError::from)?;
             options.timeout =
-                crate::cli::parse_timeout(next_value(args, index, "--timeout-seconds")?)?;
+                crate::cli::parse_timeout(next_value(args, index, "--timeout-seconds")?)
+                    .map_err(ServiceCommandParseError::from)?;
             Ok(Some(2))
         }
         "--verbose" => {
@@ -92,12 +100,14 @@ fn parse_common_option(
     }
 }
 
-fn duplicate_argument(command_name: &str, label: &str) -> ParseOutcome {
-    ParseOutcome::Error(format!("{label} de {command_name} a deja ete fourni"))
+fn duplicate_argument(command_name: &str, label: &str) -> ServiceCommandParseError {
+    ServiceCommandParseError::Message(format!("{label} de {command_name} a deja ete fourni"))
 }
 
-fn reject_unknown_option(value: &str) -> Result<usize, ParseOutcome> {
-    Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+fn reject_unknown_option(value: &str) -> Result<usize, ServiceCommandParseError> {
+    Err(ServiceCommandParseError::Message(format!(
+        "option inconnue: {value}"
+    )))
 }
 
 fn capture_named_path(
@@ -105,9 +115,9 @@ fn capture_named_path(
     args: &[String],
     index: usize,
     option_name: &str,
-    duplicate_error: ParseOutcome,
-) -> Result<usize, ParseOutcome> {
-    let value = next_value(args, index, option_name)?;
+    duplicate_error: ServiceCommandParseError,
+) -> Result<usize, ServiceCommandParseError> {
+    let value = next_value(args, index, option_name).map_err(ServiceCommandParseError::from)?;
     if slot.is_some() {
         return Err(duplicate_error);
     }
@@ -119,9 +129,9 @@ fn capture_positional_path(
     slot: &mut Option<PathBuf>,
     command_name: &str,
     value: &str,
-) -> Result<usize, ParseOutcome> {
+) -> Result<usize, ServiceCommandParseError> {
     if slot.is_some() {
-        return Err(ParseOutcome::Error(format!(
+        return Err(ServiceCommandParseError::Message(format!(
             "argument inattendu pour {command_name}: {value}"
         )));
     }
@@ -138,15 +148,39 @@ pub fn parse_with_common_options<F>(
 where
     F: FnMut(usize, &str) -> Result<usize, ParseOutcome>,
 {
+    parse_with_common_options_internal(args, options, |index, value| {
+        argument_handler(index, value).map_err(ServiceCommandParseError::from)
+    })
+    .map_err(parse_outcome)
+}
+
+fn parse_with_common_options_internal<F>(
+    args: &[String],
+    options: &mut ServiceCommandOptions,
+    mut argument_handler: F,
+) -> Result<(), ServiceCommandParseError>
+where
+    F: FnMut(usize, &str) -> Result<usize, ServiceCommandParseError>,
+{
     let mut seen = CommonOptionSeen::default();
-    scan_args(args, |index, _value| {
-        if let Some(consumed) = parse_common_option(args, index, options, &mut seen)? {
-            return Ok(ParseLoopControl::Continue(consumed));
+    let mut index = 0;
+    while index < args.len() {
+        let consumed = if let Some(consumed) = parse_common_option(args, index, options, &mut seen)?
+        {
+            consumed
+        } else {
+            argument_handler(index, args[index].as_str())?
+        };
+
+        if consumed == 0 {
+            return Err(ServiceCommandParseError::Message(format!(
+                "le parseur partage doit consommer au moins un argument: {}",
+                args[index]
+            )));
         }
 
-        let consumed = argument_handler(index, args[index].as_str())?;
-        Ok(ParseLoopControl::Continue(consumed))
-    })?;
+        index += consumed;
+    }
     Ok(())
 }
 
@@ -247,24 +281,25 @@ pub fn parse_required_path_with_optional_named_path(
     let mut required_path: Option<PathBuf> = None;
     let mut optional_path: Option<PathBuf> = None;
 
-    parse_with_common_options(args, options, |index, value| match value {
+    parse_with_common_options_internal(args, options, |index, value| match value {
         value if value == spec.required_option_name => capture_named_path(
             &mut required_path,
             args,
             index,
             spec.required_option_name,
-            ParseOutcome::Error(spec.duplicate_required_message.to_string()),
+            ServiceCommandParseError::Message(spec.duplicate_required_message.to_string()),
         ),
         value if value == spec.optional_option_name => capture_named_path(
             &mut optional_path,
             args,
             index,
             spec.optional_option_name,
-            ParseOutcome::Error(spec.duplicate_optional_message.to_string()),
+            ServiceCommandParseError::Message(spec.duplicate_optional_message.to_string()),
         ),
         value if value.starts_with("--") => reject_unknown_option(value),
         value => capture_positional_path(&mut required_path, spec.command_name, value),
-    })?;
+    })
+    .map_err(parse_outcome)?;
 
     let required_path = required_path.ok_or_else(|| {
         ParseOutcome::Error(format!(

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
-use app::service_command::ServiceCommandOptions;
+use app::service_command::{ServiceCommandKind, ServiceCommandOptions};
 use support::{command_kind, normalize_path, parse, request_for};
 
 #[test]
@@ -31,21 +31,18 @@ fn service_command_specs_cover_aliases_and_exec_request_shape() {
     assert_eq!(request.working_dir, None);
 
     assert_eq!(
-        app::service_command::ServiceCommandKind::from_name("implementation-audit"),
-        Some(app::service_command::ServiceCommandKind::ImplementationAudit)
+        ServiceCommandKind::from_name("implementation-audit"),
+        Some(ServiceCommandKind::ImplementationAudit)
     );
     assert_eq!(
-        app::service_command::ServiceCommandKind::from_name("impl-audit"),
-        Some(app::service_command::ServiceCommandKind::ImplementationAudit)
+        ServiceCommandKind::from_name("impl-audit"),
+        Some(ServiceCommandKind::ImplementationAudit)
     );
     assert_eq!(
-        app::service_command::ServiceCommandKind::from_name("loop"),
-        Some(app::service_command::ServiceCommandKind::FixLoop)
+        ServiceCommandKind::from_name("loop"),
+        Some(ServiceCommandKind::FixLoop)
     );
-    assert_eq!(
-        app::service_command::ServiceCommandKind::from_name("unknown"),
-        None
-    );
+    assert_eq!(ServiceCommandKind::from_name("unknown"), None);
 }
 
 fn refactor_workflow_path() -> String {

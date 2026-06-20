@@ -6,21 +6,19 @@ mod dispatch;
 mod exec;
 mod spec;
 
-pub use args::{
+pub(crate) use args::{
     ServiceCommandParseError, parse_required_path_with_optional_named_path,
     parse_subject_and_artifact, parse_with_common_options,
 };
 pub(crate) use context::{
     prepare_prompted_service, prepare_required_path_service, resolve_context,
 };
-pub use dispatch::ServiceCommandDispatch;
-pub use exec::{execute_service_command, execute_service_command_silently, save_markdown_artifact};
-pub use spec::{
-    AUDIT_SERVICE_COMMAND_SPEC, FIX_LOOP_SERVICE_COMMAND_SPEC,
-    IMPLEMENTATION_AUDIT_SERVICE_COMMAND_SPEC, PLAN_SERVICE_COMMAND_SPEC,
-    REVIEW_SERVICE_COMMAND_SPEC, SERVICE_COMMAND_SPECS, ServiceCommandDescriptor,
-    ServiceCommandKind, ServiceCommandOptions, ServiceCommandSpec,
+pub(crate) use dispatch::ServiceCommandDispatch;
+pub(crate) use exec::{
+    execute_service_command, execute_service_command_silently, save_markdown_artifact,
 };
+pub(crate) use spec::{SERVICE_COMMAND_SPECS, ServiceCommandDescriptor, ServiceCommandSpec};
+pub use spec::{ServiceCommandKind, ServiceCommandOptions};
 
 use crate::cli::ParseOutcome;
 use crate::codex::CodexRequest;
@@ -35,26 +33,26 @@ pub struct PreparedServiceCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedParseContext {
+pub(crate) struct PreparedParseContext {
     pub context: ExecutionContext,
     pub workspace_root: PathBuf,
     pub output_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedSubjectArtifact<T> {
+pub(crate) struct ParsedSubjectArtifact<T> {
     pub subject: T,
     pub artifact_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedRequiredPath {
+pub(crate) struct ParsedRequiredPath {
     pub required_path: PathBuf,
     pub optional_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct RequiredPathParseSpec<'a> {
+pub(crate) struct RequiredPathParseSpec<'a> {
     pub required_option_name: &'a str,
     pub optional_option_name: &'a str,
     pub command_name: &'a str,
@@ -78,6 +76,6 @@ pub(crate) fn dispatch_service_args_for_context(
     kind.parse_for_context(&args[1..], context).map(Some)
 }
 
-pub fn parse_error(error: impl std::fmt::Display) -> ParseOutcome {
+pub(crate) fn parse_error(error: impl std::fmt::Display) -> ParseOutcome {
     ParseOutcome::Error(error.to_string())
 }

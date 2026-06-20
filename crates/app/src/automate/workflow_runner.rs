@@ -145,6 +145,7 @@ fn validated_command_outcome(
     output: &StepExecution,
 ) -> io::Result<WorkflowStepOutcome> {
     // The runner owns workflow-facing validation and artifact normalization.
+    //
     // `step_outcome` decodes transport state, while this layer enforces
     // workspace-local artifact paths before placeholder expansion and stores
     // clean-loop state for later `evaluate_clean_stop`.

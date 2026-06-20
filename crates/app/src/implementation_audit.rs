@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::artifact;
 use crate::cli::ParseOutcome;
 use crate::reporting;
 use crate::service_command::{
@@ -23,6 +22,7 @@ const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
     ServiceCommandDescriptor {
         default_output_dir: ".audit",
         command_name: "implementation-audit",
+        artifact_stem: "implementation-audit",
         saved_label: "audit d'implementation",
         final_label: "audit d'implementation",
         missing_message_label: "audit d'implementation",
@@ -91,7 +91,7 @@ pub fn build_prompt(
 }
 
 pub fn save_audit(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "implementation-audit", content)
+    service_command::save_markdown_artifact(output_dir, IMPLEMENTATION_AUDIT_DESCRIPTOR, content)
 }
 
 pub fn run(
@@ -115,7 +115,25 @@ pub fn run(
     )
 }
 
+pub fn run_silently(
+    command: &ImplementationAuditCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+    service_command::execute_service_command_silently(
+        &command.service,
+        IMPLEMENTATION_AUDIT_DESCRIPTOR,
+        save_audit,
+    )
+}
+
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    parse_args_for_context(args, &context)
+}
+
+pub fn parse_args_for_context(
+    args: &[String],
+    context: &service_paths::ExecutionContext,
+) -> Result<ImplementationAuditCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let ParsedRequiredPath {
         required_path: plan_path,
@@ -131,9 +149,11 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
         "le plan d'implementation a deja ete fourni",
         "le chemin d'implementation a deja ete fourni",
     )?;
-    let parse_context =
-        service_command::prepare_parse_context(&common, IMPLEMENTATION_AUDIT_DESCRIPTOR)
-            .map_err(ParseOutcome::Error)?;
+    let parse_context = service_command::prepare_parse_context_for_context(
+        &common,
+        IMPLEMENTATION_AUDIT_DESCRIPTOR,
+        context.clone(),
+    );
     let workspace_root = parse_context.workspace_root.clone();
     let plan_path =
         resolve_plan_file(plan_path, &parse_context.context).map_err(ParseOutcome::Error)?;

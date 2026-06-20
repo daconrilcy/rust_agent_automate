@@ -1,22 +1,14 @@
 use std::time::Duration;
 
-use crate::audit::AuditCommand;
 use crate::automate::{AutomateCommand, RefactorAutomateCommand};
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::command_registry;
-use crate::fix_loop::FixLoopCommand;
-use crate::implementation_audit::ImplementationAuditCommand;
-use crate::plan::PlanCommand;
-use crate::review::ReviewCommand;
+use crate::service_command::ServiceCommandDispatch;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliCommand {
     Run(CodexRequest),
-    Audit(AuditCommand),
-    Plan(PlanCommand),
-    ImplementationAudit(ImplementationAuditCommand),
-    Review(ReviewCommand),
-    FixLoop(FixLoopCommand),
+    Service(ServiceCommandDispatch),
     Automate(AutomateCommand),
     RefactorAutomate(RefactorAutomateCommand),
 }
@@ -31,24 +23,8 @@ impl CliCommand {
     pub fn execute(self) -> i32 {
         match self {
             Self::Run(request) => run_request(&request),
-            Self::Audit(command) => {
-                run_service_command(crate::run_audit(&command));
-                0
-            }
-            Self::Plan(command) => {
-                run_service_command(crate::run_plan(&command));
-                0
-            }
-            Self::ImplementationAudit(command) => {
-                run_service_command(crate::run_implementation_audit(&command));
-                0
-            }
-            Self::Review(command) => {
-                run_service_command(crate::run_review(&command));
-                0
-            }
-            Self::FixLoop(command) => {
-                run_service_command(crate::run_fix_loop(&command));
+            Self::Service(command) => {
+                run_service_command(command.execute());
                 0
             }
             Self::Automate(command) => run_automate(&command),
@@ -67,21 +43,17 @@ pub fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
 
 pub fn print_help() {
     println!("Usage:");
-    println!(
-        "  cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]"
-    );
+    for line in command_registry::DIRECT_RUN_USAGE {
+        println!("  {line}");
+    }
     for line in command_registry::usage_lines() {
         println!("  {line}");
     }
     println!();
     println!("Exemples:");
-    println!("  cargo run -q -p app -- --model gpt-5.4 --reasoning low");
-    println!(
-        "  cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low \"Explique ce depot\""
-    );
-    println!(
-        "  cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low \"Explique ce depot\""
-    );
+    for line in command_registry::DIRECT_RUN_EXAMPLES {
+        println!("  {line}");
+    }
     for line in command_registry::example_lines() {
         println!("  {line}");
     }

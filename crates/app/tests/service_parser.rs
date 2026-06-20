@@ -1,5 +1,8 @@
+mod support;
+
 pub use app::cli::{ParseOutcome, parse_args, parse_timeout};
 
+use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
@@ -9,7 +12,7 @@ use app::codex::{
 };
 use app::command_registry;
 use app::review::ReviewSubject;
-use app::service_command::{ServiceCommandOptions, parse_with_common_options};
+use app::service_command::{ServiceCommandDispatch, ServiceCommandOptions, parse_with_common_options};
 
 fn normalize_path(path: &Path) -> String {
     std::fs::canonicalize(path)
@@ -30,11 +33,7 @@ fn parse(input: &[&str]) -> Result<CliCommand, ParseOutcome> {
 fn request_for(command: &CliCommand) -> &CodexRequest {
     match command {
         CliCommand::Run(request) => request,
-        CliCommand::Audit(command) => &command.service.request,
-        CliCommand::Plan(command) => &command.service.request,
-        CliCommand::ImplementationAudit(command) => &command.service.request,
-        CliCommand::Review(command) => &command.service.request,
-        CliCommand::FixLoop(command) => &command.service.request,
+        CliCommand::Service(command) => command.request(),
         CliCommand::Automate(_) | CliCommand::RefactorAutomate(_) => {
             panic!("les automates ne portent pas de requete Codex directe")
         }
@@ -44,14 +43,58 @@ fn request_for(command: &CliCommand) -> &CodexRequest {
 fn command_kind(command: &CliCommand) -> &'static str {
     match command {
         CliCommand::Run(_) => "run",
-        CliCommand::Audit(_) => "audit",
-        CliCommand::Plan(_) => "plan",
-        CliCommand::ImplementationAudit(_) => "implementation-audit",
-        CliCommand::Review(_) => "review",
-        CliCommand::FixLoop(_) => "fix-loop",
+        CliCommand::Service(command) => command.command_name(),
         CliCommand::Automate(_) => "automate",
         CliCommand::RefactorAutomate(_) => "refactor-automate",
     }
+}
+
+#[test]
+fn plan_command_runs_end_to_end_and_saves_the_expected_artifact() {
+    let workspace = support::temp_dir("plan_lifecycle");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
+    let log_path = workspace.join("codex.log");
+    let audit_path = workspace.join("audit.md");
+    fs::create_dir_all(&workspace).expect("creation du workspace");
+    fs::write(&audit_path, "# Audit\n\n- placeholder").expect("ecriture de l'audit");
+
+    let mut command = support::build_command();
+    command
+        .current_dir(&workspace)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
+        .env(
+            "PATH",
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+        )
+        .env("USERPROFILE", &workspace)
+        .env("FAKE_CODEX_LOG", &log_path)
+        .args(["plan", audit_path.to_str().expect("audit path utf-8")]);
+
+    let output = command.output().expect("execution du plan");
+    assert!(
+        output.status.success(),
+        "sortie inattendue: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let plan_dir = workspace.join(".plan");
+    let mut report_paths = fs::read_dir(&plan_dir)
+        .expect("lecture du dossier .plan")
+        .map(|entry| entry.expect("entree valide").path())
+        .collect::<Vec<_>>();
+    report_paths.sort();
+    assert_eq!(report_paths.len(), 1, "un seul plan doit etre genere");
+
+    let report = fs::read_to_string(&report_paths[0]).expect("lecture du plan genere");
+    assert!(report.contains("fake final message"));
+
+    let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
+    assert!(logged.contains("$refactor-plan-from-audit"));
+    assert!(logged.contains("references/plan-template.md"));
+
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
@@ -217,10 +260,16 @@ fn registered_aliases_resolve_to_expected_command_variants() {
     assert!(matches!(refactor_alias, CliCommand::RefactorAutomate(_)));
 
     let impl_alias = parse(&["impl-audit", "Cargo.toml"]).expect("alias impl-audit");
-    assert!(matches!(impl_alias, CliCommand::ImplementationAudit(_)));
+    assert!(matches!(
+        impl_alias,
+        CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(_))
+    ));
 
     let loop_alias = parse(&["loop", "implementation", "."]).expect("alias loop");
-    assert!(matches!(loop_alias, CliCommand::FixLoop(_)));
+    assert!(matches!(
+        loop_alias,
+        CliCommand::Service(ServiceCommandDispatch::FixLoop(_))
+    ));
 }
 
 #[test]
@@ -315,7 +364,7 @@ fn parses_verbose_flag() {
 fn parses_audit_command() {
     let command = parse(&["audit", "--verbose"]).expect("audit doit etre parse");
 
-    let CliCommand::Audit(audit) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
         panic!("la commande attendue est audit");
     };
 
@@ -338,7 +387,7 @@ fn parses_audit_command() {
 fn parses_audit_timeout_argument() {
     let command = parse(&["audit", "--timeout-seconds", "42"]).expect("audit timeout configurable");
 
-    let CliCommand::Audit(audit) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
         panic!("la commande attendue est audit");
     };
 
@@ -361,7 +410,7 @@ fn rejects_zero_audit_timeout() {
 fn parses_audit_target_argument() {
     let command = parse(&["audit", "--target", "."]).expect("audit cible");
 
-    let CliCommand::Audit(audit) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
         panic!("la commande attendue est audit");
     };
 
@@ -375,7 +424,7 @@ fn parses_audit_target_argument() {
 fn parses_plan_command_with_positional_audit_path() {
     let command = parse(&["plan", "Cargo.toml"]).expect("plan doit etre parse");
 
-    let CliCommand::Plan(plan) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Plan(plan)) = command else {
         panic!("la commande attendue est plan");
     };
 
@@ -394,7 +443,7 @@ fn parses_implementation_audit_command_with_positional_plan_path() {
     let command = parse(&["implementation-audit", "Cargo.toml"])
         .expect("implementation-audit doit etre parse");
 
-    let CliCommand::ImplementationAudit(audit) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
         panic!("la commande attendue est implementation-audit");
     };
 
@@ -423,7 +472,7 @@ fn parses_implementation_audit_command_with_named_options() {
     ])
     .expect("impl-audit options nommees");
 
-    let CliCommand::ImplementationAudit(audit) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
         panic!("la commande attendue est implementation-audit");
     };
 
@@ -441,7 +490,7 @@ fn parses_implementation_audit_command_with_named_options() {
 fn parses_review_command_with_positional_type_and_artifact() {
     let command = parse(&["review", "implementation", "."]).expect("review parse");
 
-    let CliCommand::Review(review) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
         panic!("la commande attendue est review");
     };
 
@@ -465,7 +514,7 @@ fn parses_review_command_with_named_type_and_artifact() {
     ])
     .expect("review options nommees");
 
-    let CliCommand::Review(review) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
         panic!("la commande attendue est review");
     };
 
@@ -478,7 +527,7 @@ fn parses_review_command_with_named_type_and_artifact() {
 fn parses_fix_loop_command_with_positional_type_and_artifact() {
     let command = parse(&["fix-loop", "plan", "Cargo.toml"]).expect("fix-loop parse");
 
-    let CliCommand::FixLoop(fix_loop) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
         panic!("la commande attendue est fix-loop");
     };
 
@@ -502,7 +551,7 @@ fn parses_fix_loop_alias_with_named_type_and_artifact() {
     ])
     .expect("loop options nommees");
 
-    let CliCommand::FixLoop(fix_loop) = command else {
+    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
         panic!("la commande attendue est fix-loop");
     };
 

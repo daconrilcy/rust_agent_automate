@@ -11,9 +11,10 @@ pub const COMMAND_OUTCOME_PATH_ENV: &str = "RUST_AGENT_COMMAND_OUTCOME_PATH";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandOutcome {
-    // Transport payload emitted by service commands for automation. The child
-    // command reports raw completion facts here; workflow automation later
-    // normalizes artifact paths and interprets `clean` for loop stopping.
+    // Transport payload emitted by service commands for automation.
+    //
+    // The child command reports raw completion facts here; workflow automation
+    // later normalizes artifact paths and interprets `clean` for loop stopping.
     pub command_name: String,
     pub status_code: Option<i32>,
     pub final_message_present: bool,
@@ -184,29 +185,36 @@ pub fn print_completed_report(report: &CompletedReport, spec: &ReportSpec<'_>) {
 }
 
 pub fn print_report_failure(failure: &ReportFailure, spec: &ReportSpec<'_>) {
+    eprintln!("{}", render_report_failure(failure, spec));
+}
+
+pub fn render_report_failure(failure: &ReportFailure, spec: &ReportSpec<'_>) -> String {
     match failure {
-        ReportFailure::CodexCall(error) => {
-            eprintln!("echec lors de l'appel a codex: {error}");
-        }
+        ReportFailure::CodexCall(error) => format!("echec lors de l'appel a codex: {error}"),
         ReportFailure::MissingFinalMessage {
             status_code,
             stdout,
             stderr,
         } => {
             if *status_code != 0 {
-                print_failure_details(stdout, stderr);
+                let stderr = stderr.trim();
+                let stdout = stdout.trim();
+                if !stderr.is_empty() {
+                    stderr.to_string()
+                } else if !stdout.is_empty() {
+                    stdout.to_string()
+                } else {
+                    String::new()
+                }
             } else {
-                eprintln!(
+                format!(
                     "codex n'a pas retourne de message final pour {}",
                     spec.missing_message_label
-                );
+                )
             }
         }
         ReportFailure::Save { error, .. } => {
-            eprintln!(
-                "echec lors de l'enregistrement du {}: {error}",
-                spec.saved_label
-            );
+            format!("echec lors de l'enregistrement du {}: {error}", spec.saved_label)
         }
     }
 }

@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
 use crate::service_command::{
     self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
@@ -19,6 +18,7 @@ pub struct AuditCommand {
 const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".audit",
     command_name: "audit",
+    artifact_stem: "audit",
     saved_label: "audit",
     final_label: "audit",
     missing_message_label: "rapport d'audit",
@@ -72,11 +72,25 @@ pub fn run(
     )
 }
 
+pub fn run_silently(
+    command: &AuditCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+    service_command::execute_service_command_silently(&command.service, AUDIT_DESCRIPTOR, save_report)
+}
+
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "audit", content)
+    service_command::save_markdown_artifact(output_dir, AUDIT_DESCRIPTOR, content)
 }
 
 pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    parse_args_for_context(args, &context)
+}
+
+pub fn parse_args_for_context(
+    args: &[String],
+    context: &service_paths::ExecutionContext,
+) -> Result<AuditCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut target_dir: Option<PathBuf> = None;
 
@@ -94,8 +108,8 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         ))),
     })?;
 
-    let parse_context = service_command::prepare_parse_context(&common, AUDIT_DESCRIPTOR)
-        .map_err(ParseOutcome::Error)?;
+    let parse_context =
+        service_command::prepare_parse_context_for_context(&common, AUDIT_DESCRIPTOR, context.clone());
     let workspace_root = parse_context.workspace_root.clone();
     let target_dir = resolve_target_dir(
         target_dir.unwrap_or_else(|| workspace_root.clone()),

@@ -6,7 +6,7 @@ use crate::cli::{ParseOutcome, next_value, parse_timeout};
 use crate::codex::{
     CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
 };
-use crate::reporting::{self, ReportSpec};
+use crate::reporting::{self, CompletedReport, ReportFailure, ReportSpec};
 use crate::service_paths::{self, ExecutionContext};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,10 +99,62 @@ pub struct ParsedRequiredPath {
 pub struct ServiceCommandDescriptor<'a> {
     pub default_output_dir: &'a str,
     pub command_name: &'a str,
+    pub artifact_stem: &'a str,
     pub saved_label: &'a str,
     pub final_label: &'a str,
     pub missing_message_label: &'a str,
     pub clean_detector: Option<fn(&str) -> bool>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ServiceCommandDispatch {
+    Audit(crate::audit::AuditCommand),
+    Plan(crate::plan::PlanCommand),
+    ImplementationAudit(crate::implementation_audit::ImplementationAuditCommand),
+    Review(crate::review::ReviewCommand),
+    FixLoop(crate::fix_loop::FixLoopCommand),
+}
+
+impl ServiceCommandDispatch {
+    pub fn command_name(&self) -> &'static str {
+        match self {
+            Self::Audit(_) => "audit",
+            Self::Plan(_) => "plan",
+            Self::ImplementationAudit(_) => "implementation-audit",
+            Self::Review(_) => "review",
+            Self::FixLoop(_) => "fix-loop",
+        }
+    }
+
+    pub fn request(&self) -> &CodexRequest {
+        match self {
+            Self::Audit(command) => &command.service.request,
+            Self::Plan(command) => &command.service.request,
+            Self::ImplementationAudit(command) => &command.service.request,
+            Self::Review(command) => &command.service.request,
+            Self::FixLoop(command) => &command.service.request,
+        }
+    }
+
+    pub fn execute(&self) -> Result<CompletedReport, ReportFailure> {
+        match self {
+            Self::Audit(command) => crate::run_audit(command),
+            Self::Plan(command) => crate::run_plan(command),
+            Self::ImplementationAudit(command) => crate::run_implementation_audit(command),
+            Self::Review(command) => crate::run_review(command),
+            Self::FixLoop(command) => crate::run_fix_loop(command),
+        }
+    }
+
+    pub fn execute_silently(&self) -> Result<CompletedReport, ReportFailure> {
+        match self {
+            Self::Audit(command) => crate::audit::run_silently(command),
+            Self::Plan(command) => crate::plan::run_silently(command),
+            Self::ImplementationAudit(command) => crate::implementation_audit::run_silently(command),
+            Self::Review(command) => crate::review::run_silently(command),
+            Self::FixLoop(command) => crate::fix_loop::run_silently(command),
+        }
+    }
 }
 
 pub fn parse_common_option(
@@ -329,14 +381,22 @@ pub fn prepare_parse_context(
     descriptor: ServiceCommandDescriptor<'_>,
 ) -> Result<PreparedParseContext, String> {
     let context = resolve_context()?;
+    Ok(prepare_parse_context_for_context(options, descriptor, context))
+}
+
+pub fn prepare_parse_context_for_context(
+    options: &ServiceCommandOptions,
+    descriptor: ServiceCommandDescriptor<'_>,
+    context: ExecutionContext,
+) -> PreparedParseContext {
     let workspace_root = context.workspace_root().to_path_buf();
     let output_dir = resolve_output_dir(options, &context, descriptor.default_output_dir);
 
-    Ok(PreparedParseContext {
+    PreparedParseContext {
         context,
         workspace_root,
         output_dir,
-    })
+    }
 }
 
 pub fn prepare_service_from_prompt(
@@ -353,10 +413,9 @@ pub fn execute_service_command(
     descriptor: ServiceCommandDescriptor<'_>,
     intro: String,
     save: fn(&Path, &str) -> io::Result<PathBuf>,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+) -> Result<CompletedReport, ReportFailure> {
     run_service_command(
-        &command.request,
-        command.timeout,
+        command,
         ServiceRunSpec {
             intro,
             command_name: descriptor.command_name,
@@ -370,14 +429,31 @@ pub fn execute_service_command(
     )
 }
 
+pub fn execute_service_command_silently(
+    command: &PreparedServiceCommand,
+    descriptor: ServiceCommandDescriptor<'_>,
+    save: fn(&Path, &str) -> io::Result<PathBuf>,
+) -> Result<CompletedReport, ReportFailure> {
+    run_service_command_silently(
+        command,
+        ReportSpec {
+            command_name: descriptor.command_name,
+            saved_label: descriptor.saved_label,
+            final_label: descriptor.final_label,
+            missing_message_label: descriptor.missing_message_label,
+            output_dir: &command.output_dir,
+            save,
+            clean_detector: descriptor.clean_detector,
+        },
+    )
+}
+
 pub fn run_service_command(
-    request: &CodexRequest,
-    timeout: Duration,
+    command: &PreparedServiceCommand,
     spec: ServiceRunSpec<'_>,
-) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+) -> Result<CompletedReport, ReportFailure> {
     eprintln!("{}", spec.intro);
-    let report_spec = spec.report_spec();
-    let result = reporting::run_codex_report(request, timeout, report_spec);
+    let result = run_service_command_silently(command, spec.report_spec());
 
     match &result {
         Ok(report) => reporting::print_completed_report(report, &spec.report_spec()),
@@ -385,6 +461,21 @@ pub fn run_service_command(
     }
 
     result
+}
+
+pub fn run_service_command_silently(
+    command: &PreparedServiceCommand,
+    spec: ReportSpec<'_>,
+) -> Result<CompletedReport, ReportFailure> {
+    reporting::run_codex_report(&command.request, command.timeout, spec)
+}
+
+pub fn save_markdown_artifact(
+    output_dir: &Path,
+    descriptor: ServiceCommandDescriptor<'_>,
+    content: &str,
+) -> io::Result<PathBuf> {
+    crate::artifact::save_timestamped_markdown(output_dir, descriptor.artifact_stem, content)
 }
 
 #[cfg(test)]

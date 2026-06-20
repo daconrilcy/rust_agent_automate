@@ -6,7 +6,8 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codex;
-use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome};
+use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome, CompletedReport, ReportFailure};
+use crate::service_paths::ExecutionContext;
 
 use super::workflow_model::{LoopPolicy, Workflow, WorkflowStep, WorkflowStepKind};
 use super::workflow_runner::RunContext;
@@ -17,6 +18,24 @@ struct StepCommandSpec {
     cargo_target_dir: PathBuf,
     workspace_root: PathBuf,
     outcome_path: PathBuf,
+}
+
+struct CurrentDirGuard {
+    previous: PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn change_to(path: &Path) -> io::Result<Self> {
+        let previous = std::env::current_dir()?;
+        std::env::set_current_dir(normalize_working_dir(path))?;
+        Ok(Self { previous })
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.previous);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,10 +75,14 @@ pub fn run_step(
     context: &RunContext,
 ) -> io::Result<StepExecution> {
     let command = build_step_command_spec(workflow, step, context);
-    let output = execute_step_command(&command)?;
-    let command_outcome = decode_command_outcome(&command.outcome_path)?;
-
-    Ok(step_execution_from_output(output, command_outcome))
+    match step.kind {
+        WorkflowStepKind::ServiceCommand => execute_service_step_in_process(&command),
+        WorkflowStepKind::DirectRun | WorkflowStepKind::NestedCommand => {
+            let output = execute_step_command(&command)?;
+            let command_outcome = decode_command_outcome(&command.outcome_path)?;
+            Ok(step_execution_from_output(output, command_outcome))
+        }
+    }
 }
 
 pub(crate) fn command_outcome_for_step(
@@ -68,9 +91,10 @@ pub(crate) fn command_outcome_for_step(
     _context: &RunContext,
     output: &StepExecution,
 ) -> io::Result<WorkflowStepOutcome> {
-    // Transport decoding lives in this module. The workflow runner only
-    // consumes this reduced state and does not depend on the persisted
-    // `CommandOutcome` payload shape beyond these fields.
+    // Transport decoding lives in this module.
+    //
+    // The workflow runner only consumes this reduced state and does not depend
+    // on the persisted `CommandOutcome` payload shape beyond these fields.
     if let Some(outcome) = &output.command_outcome {
         let mut outcome = outcome.clone();
         outcome.status_code = normalized_status_code(outcome.status_code);
@@ -152,6 +176,28 @@ fn execute_step_command(spec: &StepCommandSpec) -> io::Result<std::process::Outp
     command.output()
 }
 
+fn execute_service_step_in_process(spec: &StepCommandSpec) -> io::Result<StepExecution> {
+    let context = ExecutionContext::from_workspace_root(spec.workspace_root.clone())
+        .with_output_root(spec.current_dir.clone());
+    let _guard = CurrentDirGuard::change_to(&spec.current_dir)?;
+    let dispatch = crate::command_registry::parse_service_subcommand_for_context(&spec.args, &context)
+        .ok_or_else(|| {
+            io::Error::other(format!(
+                "l'etape automate '{}' n'est pas une commande de service prise en charge",
+                spec.args.first().cloned().unwrap_or_default()
+            ))
+        })?
+        .map_err(|error| io::Error::other(format!("echec du parseur interne: {error:?}")))?;
+
+    match dispatch.execute_silently() {
+        Ok(report) => Ok(step_execution_from_report(report)),
+        Err(error) => Ok(step_execution_from_report_failure(
+            dispatch.command_name(),
+            error,
+        )),
+    }
+}
+
 fn step_execution_from_output(
     output: std::process::Output,
     command_outcome: Option<CommandOutcome>,
@@ -162,6 +208,58 @@ fn step_execution_from_output(
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         command_outcome,
+    }
+}
+
+fn step_execution_from_report(report: CompletedReport) -> StepExecution {
+    StepExecution {
+        status_code: normalized_status_code(report.outcome.status_code),
+        success: report.status_code == 0,
+        stdout: report.stdout,
+        stderr: report.stderr,
+        command_outcome: Some(report.outcome),
+    }
+}
+
+fn step_execution_from_report_failure(command_name: &str, failure: ReportFailure) -> StepExecution {
+    match failure {
+        ReportFailure::CodexCall(error) => StepExecution {
+            status_code: Some(1),
+            success: false,
+            stdout: String::new(),
+            stderr: error,
+            command_outcome: None,
+        },
+        ReportFailure::MissingFinalMessage {
+            status_code,
+            stdout,
+            stderr,
+        } => StepExecution {
+            status_code: normalized_status_code(Some(status_code)),
+            success: false,
+            stdout,
+            stderr,
+            command_outcome: Some(CommandOutcome {
+                command_name: command_name.to_string(),
+                status_code: Some(status_code),
+                final_message_present: false,
+                artifact_path: None,
+                clean: None,
+            }),
+        },
+        ReportFailure::Save { clean, error, .. } => StepExecution {
+            status_code: Some(1),
+            success: false,
+            stdout: String::new(),
+            stderr: error,
+            command_outcome: Some(CommandOutcome {
+                command_name: command_name.to_string(),
+                status_code: Some(1),
+                final_message_present: true,
+                artifact_path: None,
+                clean,
+            }),
+        },
     }
 }
 
@@ -179,9 +277,11 @@ fn temp_outcome_file_path() -> PathBuf {
 }
 
 // Child steps own process execution and publish their transport payload through
-// `RUST_AGENT_COMMAND_OUTCOME_PATH`. This module decodes that payload into
-// `CommandOutcome`; workflow-facing shaping happens in `command_outcome_for_step`
-// and later artifact normalization remains the runner's responsibility.
+// `RUST_AGENT_COMMAND_OUTCOME_PATH`.
+//
+// This module decodes that payload into `CommandOutcome`; workflow-facing
+// shaping happens in `command_outcome_for_step`, and later artifact
+// normalization remains the runner's responsibility.
 fn decode_command_outcome(path: &Path) -> io::Result<Option<CommandOutcome>> {
     let content = match fs::read(path) {
         Ok(content) => content,
@@ -203,6 +303,15 @@ fn cargo_target_dir_for_context(context: &RunContext, process_id: u32) -> PathBu
 
 fn child_current_dir(context: &RunContext) -> &Path {
     &context.workspace_root
+}
+
+fn normalize_working_dir(path: &Path) -> PathBuf {
+    let text = path.display().to_string();
+    if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::artifact;
 use crate::cli::ParseOutcome;
 use crate::review::{self, ReviewSubject};
 use crate::service_command::{
@@ -21,6 +20,7 @@ pub struct FixLoopCommand {
 const FIX_LOOP_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".fix-loop",
     command_name: "fix-loop",
+    artifact_stem: "fix-loop",
     saved_label: "rapport fix-loop",
     final_label: "rapport fix-loop",
     missing_message_label: "rapport fix-loop",
@@ -62,7 +62,7 @@ pub fn build_prompt(
 }
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "fix-loop", content)
+    service_command::save_markdown_artifact(output_dir, FIX_LOOP_DESCRIPTOR, content)
 }
 
 pub fn run(
@@ -81,7 +81,25 @@ pub fn run(
     )
 }
 
+pub fn run_silently(
+    command: &FixLoopCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+    service_command::execute_service_command_silently(
+        &command.service,
+        FIX_LOOP_DESCRIPTOR,
+        save_report,
+    )
+}
+
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    parse_args_for_context(args, &context)
+}
+
+pub fn parse_args_for_context(
+    args: &[String],
+    context: &crate::service_paths::ExecutionContext,
+) -> Result<FixLoopCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(1800));
     let ParsedSubjectArtifact {
         subject: input_kind,
@@ -94,8 +112,11 @@ pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
         "fix-loop",
         parse_input_kind,
     )?;
-    let parse_context = service_command::prepare_parse_context(&common, FIX_LOOP_DESCRIPTOR)
-        .map_err(ParseOutcome::Error)?;
+    let parse_context = service_command::prepare_parse_context_for_context(
+        &common,
+        FIX_LOOP_DESCRIPTOR,
+        context.clone(),
+    );
     let workspace_root = parse_context.workspace_root.clone();
     let artifact_path = resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
         .map_err(ParseOutcome::Error)?;

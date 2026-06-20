@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
 use crate::service_command::{
     self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
@@ -19,6 +18,7 @@ pub struct PlanCommand {
 const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".plan",
     command_name: "plan",
+    artifact_stem: "plan",
     saved_label: "plan",
     final_label: "plan",
     missing_message_label: "plan",
@@ -52,7 +52,7 @@ pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path)
 }
 
 pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "plan", content)
+    service_command::save_markdown_artifact(output_dir, PLAN_DESCRIPTOR, content)
 }
 
 pub fn run(
@@ -70,7 +70,21 @@ pub fn run(
     )
 }
 
+pub fn run_silently(
+    command: &PlanCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+    service_command::execute_service_command_silently(&command.service, PLAN_DESCRIPTOR, save_plan)
+}
+
 pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    parse_args_for_context(args, &context)
+}
+
+pub fn parse_args_for_context(
+    args: &[String],
+    context: &service_paths::ExecutionContext,
+) -> Result<PlanCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut audit_path: Option<PathBuf> = None;
 
@@ -100,8 +114,8 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         }
     })?;
 
-    let parse_context = service_command::prepare_parse_context(&common, PLAN_DESCRIPTOR)
-        .map_err(ParseOutcome::Error)?;
+    let parse_context =
+        service_command::prepare_parse_context_for_context(&common, PLAN_DESCRIPTOR, context.clone());
     let workspace_root = parse_context.workspace_root.clone();
     let audit_path = resolve_audit_file(audit_path.ok_or_else(|| {
         ParseOutcome::Error(

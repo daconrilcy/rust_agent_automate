@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::artifact;
 use crate::cli::ParseOutcome;
 use crate::service_command::{
     self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
@@ -75,6 +74,7 @@ pub struct ReviewCommand {
 const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
     default_output_dir: ".review",
     command_name: "review",
+    artifact_stem: "review",
     saved_label: "review",
     final_label: "review",
     missing_message_label: "review",
@@ -135,7 +135,7 @@ pub fn build_prompt(
 }
 
 pub fn save_review(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
-    artifact::save_timestamped_markdown(output_dir, "review", content)
+    service_command::save_markdown_artifact(output_dir, REVIEW_DESCRIPTOR, content)
 }
 
 pub fn run(
@@ -154,7 +154,21 @@ pub fn run(
     )
 }
 
+pub fn run_silently(
+    command: &ReviewCommand,
+) -> Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure> {
+    service_command::execute_service_command_silently(&command.service, REVIEW_DESCRIPTOR, save_review)
+}
+
 pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    parse_args_for_context(args, &context)
+}
+
+pub fn parse_args_for_context(
+    args: &[String],
+    context: &service_paths::ExecutionContext,
+) -> Result<ReviewCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let ParsedSubjectArtifact {
         subject,
@@ -167,8 +181,8 @@ pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
         "review",
         |value| value.parse(),
     )?;
-    let parse_context = service_command::prepare_parse_context(&common, REVIEW_DESCRIPTOR)
-        .map_err(ParseOutcome::Error)?;
+    let parse_context =
+        service_command::prepare_parse_context_for_context(&common, REVIEW_DESCRIPTOR, context.clone());
     let workspace_root = parse_context.workspace_root.clone();
     let artifact_path = resolve_artifact_path(subject, artifact_path, &parse_context.context)
         .map_err(ParseOutcome::Error)?;

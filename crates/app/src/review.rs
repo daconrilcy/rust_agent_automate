@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact_subject;
 use crate::cli::ParseOutcome;
+use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
     self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
     ServiceCommandOptions,
@@ -44,26 +46,26 @@ pub fn build_prompt(
     artifact_path: &Path,
     output_dir: &Path,
 ) -> String {
-    format!(
-        concat!(
-            "Use $adversarial-review to perform an adversarial review of the {} at \"{}\".\n",
-            "The review must use the central Codex skill named adversarial-review and follow its SKILL.md instructions.\n",
-            "Review mode: {}.\n",
-            "The current local workspace running this command is \"{}\" and the final review will be saved by the wrapper under \"{}\".\n",
-            "Gather direct evidence before judging. Read the artifact completely and inspect supporting local files, diffs, tests, or linked artifacts when available.\n",
-            "Do not modify source code. Produce the final answer as a complete Markdown adversarial review only.\n",
-            "Use the output format specified by the adversarial-review skill: Findings, Open Questions, then Verdict.\n",
-            "Rank only actionable findings by real impact and likelihood. If there are no findings, say so explicitly and name residual risks or test gaps."
+    render_structured_prompt(
+        &format!(
+            "Use $adversarial-review to perform an adversarial review of the {} at \"{}\".\nThe review must use the central Codex skill named adversarial-review and follow its SKILL.md instructions.\nReview mode: {}.",
+            subject.artifact_name(),
+            artifact_path.display(),
+            match subject {
+                ReviewSubject::Plan => "Plan review",
+                ReviewSubject::Audit => "Audit review",
+                ReviewSubject::Implementation => "Implementation review",
+            }
         ),
-        subject.artifact_name(),
-        artifact_path.display(),
-        match subject {
-            ReviewSubject::Plan => "Plan review",
-            ReviewSubject::Audit => "Audit review",
-            ReviewSubject::Implementation => "Implementation review",
-        },
-        workspace_root.display(),
-        output_dir.display()
+        workspace_root,
+        output_dir,
+        "final review",
+        &[PromptSection {
+            heading: Cow::Borrowed(""),
+            body: Cow::Borrowed(
+                "Gather direct evidence before judging. Read the artifact completely and inspect supporting local files, diffs, tests, or linked artifacts when available.\nDo not modify source code. Produce the final answer as a complete Markdown adversarial review only.\nUse the output format specified by the adversarial-review skill: Findings, Open Questions, then Verdict.\nRank only actionable findings by real impact and likelihood. If there are no findings, say so explicitly and name residual risks or test gaps.",
+            ),
+        }],
     )
 }
 
@@ -97,6 +99,7 @@ pub fn run_silently(
     )
 }
 
+#[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     parse_args_for_context(args, &context)
@@ -175,6 +178,7 @@ mod tests {
         assert!(prompt.contains("Review mode: Plan review"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
         assert!(prompt.contains("C:\\dev\\rust_agent"));
+        assert!(prompt.contains("final review will be saved by the wrapper"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.review"));
         assert!(prompt.contains("complete Markdown adversarial review only"));
         assert!(prompt.contains("output format specified by the adversarial-review skill"));

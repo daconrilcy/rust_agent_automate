@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::ParseOutcome;
+use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::reporting;
 use crate::service_command::{
     self, ParsedRequiredPath, PreparedServiceCommand, RequiredPathParseSpec,
@@ -73,20 +75,23 @@ pub fn build_prompt(
             )
         },
     );
-
-    format!(
-        concat!(
-            "Use $rust-implementation-plan-audit to audit whether the Rust implementation follows the implementation plan at \"{}\".\n",
-            "The audit must use the central Codex skill named rust-implementation-plan-audit and follow its SKILL.md instructions.\n",
-            "The current local workspace running this command is \"{}\" and the final audit report will be saved by the wrapper under \"{}\".\n",
-            "{}\n",
-            "Read the implementation plan completely before judging the code. Build a requirements checklist from the plan, gather direct local evidence, and map every plan item to implementation status.\n",
-            "Do not modify source code. Produce the final answer as a complete Markdown Rust Implementation Plan Audit report only, using the report structure required by the rust-implementation-plan-audit skill."
-        ),
-        plan_path.display(),
-        workspace_root.display(),
-        output_dir.display(),
+    let body = format!(
+        "{}\nRead the implementation plan completely before judging the code. Build a requirements checklist from the plan, gather direct local evidence, and map every plan item to implementation status.\nDo not modify source code. Produce the final answer as a complete Markdown Rust Implementation Plan Audit report only, using the report structure required by the rust-implementation-plan-audit skill.",
         implementation_scope
+    );
+
+    render_structured_prompt(
+        &format!(
+            "Use $rust-implementation-plan-audit to audit whether the Rust implementation follows the implementation plan at \"{}\".\nThe audit must use the central Codex skill named rust-implementation-plan-audit and follow its SKILL.md instructions.",
+            plan_path.display()
+        ),
+        workspace_root,
+        output_dir,
+        "final audit report",
+        &[PromptSection {
+            heading: Cow::Borrowed(""),
+            body: Cow::Owned(body),
+        }],
     )
 }
 
@@ -125,6 +130,7 @@ pub fn run_silently(
     )
 }
 
+#[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     parse_args_for_context(args, &context)
@@ -200,6 +206,7 @@ mod tests {
         assert!(prompt.contains("central Codex skill named rust-implementation-plan-audit"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
         assert!(prompt.contains("No explicit implementation path was provided"));
+        assert!(prompt.contains("final audit report will be saved by the wrapper"));
         assert!(prompt.contains("complete Markdown Rust Implementation Plan Audit report only"));
     }
 

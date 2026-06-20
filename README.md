@@ -20,7 +20,7 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 ```powershell
 cargo run -p app
 cargo check
-cargo test
+$env:CARGO_TARGET_DIR='.target-verify'; cargo test
 cargo run -q -p app -- audit
 cargo run -q -p app -- audit --target ..\mon-projet
 cargo run -q -p app -- audit --timeout-seconds 120
@@ -36,6 +36,16 @@ cargo run -q -p app -- fix-loop audit .audit\audit-1781887189.md
 cargo run -q -p app -- fix-loop implementation crates\app
 cargo run -q -p app -- automate .\workflow.json "Objectif initial"
 cargo run -q -p app -- refactor-automate --target crates\app "Refactoring SOLID/KISS/DRY"
+```
+
+## Verification locale
+
+Sur cette machine, `cargo test` peut echouer en cible par defaut si `target\debug\app.exe` reste verrouille. La voie de verification recommandee pour cette passe de refactoring est:
+
+```powershell
+$env:CARGO_TARGET_DIR='.target-verify'; cargo test --test service_parser
+$env:CARGO_TARGET_DIR='.target-verify'; cargo test --test workflow_chain
+$env:CARGO_TARGET_DIR='.target-verify'; cargo test
 ```
 
 ## Workflow JSON d'automate

@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact_subject::ReviewSubject;
 use crate::cli::ParseOutcome;
+use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
     self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
     ServiceCommandOptions,
@@ -41,23 +43,22 @@ pub fn build_prompt(
     artifact_path: &Path,
     output_dir: &Path,
 ) -> String {
-    format!(
-        concat!(
-            "Use $rust-review-fix-loop to process the {} at \"{}\".\n",
-            "The loop must use the central Codex skill named rust-review-fix-loop and follow its SKILL.md instructions.\n",
-            "Input kind: {}.\n",
-            "The current local workspace running this command is \"{}\" and the final loop report will be saved by the wrapper under \"{}\".\n",
-            "If the input is an audit, read the audit completely, derive the required Rust implementation work, apply corrections with rust-dev-solid, then run adversarial-review cycles until no actionable findings remain.\n",
-            "If the input is a plan, read the plan completely, implement the scoped Rust changes with rust-dev-solid, then run adversarial-review cycles until no actionable findings remain.\n",
-            "If the input is an implementation, review the current implementation at the provided path, correct actionable findings with rust-dev-solid, then repeat review and correction until clean.\n",
-            "Inspect the local workspace directly before editing. If this workspace is not a Git repository, mention that briefly and continue from filesystem evidence.\n",
-            "Produce the final answer as a complete Markdown loop report with: final review verdict, files changed, verification commands and results, residual risks, and any blocker."
+    render_structured_prompt(
+        &format!(
+            "Use $rust-review-fix-loop to process the {} at \"{}\".\nThe loop must use the central Codex skill named rust-review-fix-loop and follow its SKILL.md instructions.\nInput kind: {}.",
+            input_kind.artifact_name(),
+            artifact_path.display(),
+            input_kind
         ),
-        input_kind.artifact_name(),
-        artifact_path.display(),
-        input_kind,
-        workspace_root.display(),
-        output_dir.display()
+        workspace_root,
+        output_dir,
+        "final loop report",
+        &[PromptSection {
+            heading: Cow::Borrowed(""),
+            body: Cow::Borrowed(
+                "If the input is an audit, read the audit completely, derive the required Rust implementation work, apply corrections with rust-dev-solid, then run adversarial-review cycles until no actionable findings remain.\nIf the input is a plan, read the plan completely, implement the scoped Rust changes with rust-dev-solid, then run adversarial-review cycles until no actionable findings remain.\nIf the input is an implementation, review the current implementation at the provided path, correct actionable findings with rust-dev-solid, then repeat review and correction until clean.\nInspect the local workspace directly before editing. If this workspace is not a Git repository, mention that briefly and continue from filesystem evidence.\nProduce the final answer as a complete Markdown loop report with: final review verdict, files changed, verification commands and results, residual risks, and any blocker.",
+            ),
+        }],
     )
 }
 
@@ -91,6 +92,7 @@ pub fn run_silently(
     )
 }
 
+#[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     parse_args_for_context(args, &context)
@@ -182,6 +184,7 @@ mod tests {
         assert!(prompt.contains("central Codex skill named rust-review-fix-loop"));
         assert!(prompt.contains("Input kind: plan"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
+        assert!(prompt.contains("final loop report will be saved by the wrapper"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.fix-loop"));
         assert!(prompt.contains("rust-dev-solid"));
         assert!(prompt.contains("adversarial-review cycles until no actionable findings remain"));

@@ -1,20 +1,26 @@
 use crate::cli::{CliCommand, ParseOutcome};
-use crate::service_command::ServiceCommandDispatch;
+use crate::service_command::{SERVICE_COMMAND_SPECS, ServiceCommandDispatch, ServiceCommandKind};
 use crate::service_paths::ExecutionContext;
 
 type CommandParser = fn(&[String], Option<&ExecutionContext>) -> Result<CliCommand, ParseOutcome>;
-type ServiceParser<T> = fn(&[String], &ExecutionContext) -> Result<T, ParseOutcome>;
-type ServiceParserDefault<T> = fn(&[String]) -> Result<T, ParseOutcome>;
-type ServiceWrap<T> = fn(T) -> ServiceCommandDispatch;
 
 #[derive(Debug, Clone, Copy)]
-pub struct CommandSpec {
-    pub name: &'static str,
-    pub aliases: &'static [&'static str],
+struct StaticCommandSpec {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    accepts_codex_options: bool,
+    usage: &'static [&'static str],
+    examples: &'static [&'static str],
+    parser: CommandParser,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RegisteredCommand<'a> {
+    pub name: &'a str,
+    pub aliases: &'a [&'a str],
     pub accepts_codex_options: bool,
-    pub usage: &'static [&'static str],
-    pub examples: &'static [&'static str],
-    pub parser: Option<CommandParser>,
+    pub usage: &'a [&'a str],
+    pub examples: &'a [&'a str],
 }
 
 pub const DIRECT_RUN_USAGE: &[&str] = &[
@@ -27,90 +33,18 @@ pub const DIRECT_RUN_EXAMPLES: &[&str] = &[
     r#"cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low "Explique ce depot""#,
 ];
 
-pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec {
-        name: "audit",
-        aliases: &[],
-        accepts_codex_options: true,
-        usage: &[
-            "cargo run -p app -- audit [--target <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- audit",
-            "cargo run -q -p app -- audit --target ..\\mon-projet",
-            "cargo run -q -p app -- audit --output-dir .audit",
-            "cargo run -q -p app -- audit --timeout-seconds 120",
-        ],
-        parser: Some(parse_audit_command),
-    },
-    CommandSpec {
-        name: "plan",
-        aliases: &[],
-        accepts_codex_options: true,
-        usage: &[
-            "cargo run -p app -- plan <chemin-audit> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- plan .audit\\audit-1781887189.md",
-            "cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan",
-        ],
-        parser: Some(parse_plan_command),
-    },
-    CommandSpec {
-        name: "implementation-audit",
-        aliases: &["impl-audit"],
-        accepts_codex_options: true,
-        usage: &[
-            "cargo run -p app -- implementation-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-            "cargo run -p app -- impl-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md",
-            "cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app",
-        ],
-        parser: Some(parse_implementation_audit_command),
-    },
-    CommandSpec {
-        name: "review",
-        aliases: &[],
-        accepts_codex_options: true,
-        usage: &[
-            "cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- review plan .plan\\plan-1781894465.md",
-            "cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md",
-            "cargo run -q -p app -- review implementation crates\\app",
-        ],
-        parser: Some(parse_review_command),
-    },
-    CommandSpec {
-        name: "fix-loop",
-        aliases: &["loop"],
-        accepts_codex_options: true,
-        usage: &[
-            "cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-            "cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- fix-loop plan .plan\\plan-1781894465.md",
-            "cargo run -q -p app -- fix-loop audit .audit\\audit-1781887189.md",
-            "cargo run -q -p app -- fix-loop implementation crates\\app",
-            "cargo run -q -p app -- loop implementation crates\\app",
-        ],
-        parser: Some(parse_fix_loop_command),
-    },
-    CommandSpec {
+const STATIC_COMMANDS: &[StaticCommandSpec] = &[
+    StaticCommandSpec {
         name: "automate",
         aliases: &[],
         accepts_codex_options: false,
         usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
         examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
-        parser: Some(|args, _context| {
+        parser: |args, _context| {
             crate::automate::parse_automate_args(args).map(CliCommand::Automate)
-        }),
+        },
     },
-    CommandSpec {
+    StaticCommandSpec {
         name: "refactor-automate",
         aliases: &["refactor-auto"],
         accepts_codex_options: false,
@@ -120,32 +54,67 @@ pub const COMMANDS: &[CommandSpec] = &[
         examples: &[
             "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",
         ],
-        parser: Some(|args, _context| {
+        parser: |args, _context| {
             crate::automate::parse_refactor_automate_args(args).map(CliCommand::RefactorAutomate)
-        }),
+        },
     },
 ];
 
+pub fn registered_commands() -> Vec<RegisteredCommand<'static>> {
+    let service_commands = SERVICE_COMMAND_SPECS.iter().map(|spec| RegisteredCommand {
+        name: spec.name,
+        aliases: spec.aliases,
+        accepts_codex_options: spec.accepts_codex_options,
+        usage: spec.usage,
+        examples: spec.examples,
+    });
+    let static_commands = STATIC_COMMANDS.iter().map(|spec| RegisteredCommand {
+        name: spec.name,
+        aliases: spec.aliases,
+        accepts_codex_options: spec.accepts_codex_options,
+        usage: spec.usage,
+        examples: spec.examples,
+    });
+
+    service_commands.chain(static_commands).collect()
+}
+
 pub fn is_known_subcommand(value: &str) -> bool {
-    COMMANDS
+    SERVICE_COMMAND_SPECS
         .iter()
         .any(|spec| spec.name == value || spec.aliases.contains(&value))
+        || STATIC_COMMANDS
+            .iter()
+            .any(|spec| spec.name == value || spec.aliases.contains(&value))
 }
 
 pub fn canonical_name(value: Option<&str>) -> Option<&'static str> {
     let value = value?;
 
-    COMMANDS
+    SERVICE_COMMAND_SPECS
         .iter()
         .find(|spec| spec.name == value || spec.aliases.contains(&value))
         .map(|spec| spec.name)
+        .or_else(|| {
+            STATIC_COMMANDS
+                .iter()
+                .find(|spec| spec.name == value || spec.aliases.contains(&value))
+                .map(|spec| spec.name)
+        })
 }
 
 pub fn accepts_codex_options(value: &str) -> bool {
-    COMMANDS
+    SERVICE_COMMAND_SPECS
         .iter()
         .find(|spec| spec.name == value || spec.aliases.contains(&value))
-        .is_some_and(|spec| spec.accepts_codex_options)
+        .map(|spec| spec.accepts_codex_options)
+        .or_else(|| {
+            STATIC_COMMANDS
+                .iter()
+                .find(|spec| spec.name == value || spec.aliases.contains(&value))
+                .map(|spec| spec.accepts_codex_options)
+        })
+        .unwrap_or(false)
 }
 
 pub fn is_direct_run(value: Option<&str>) -> bool {
@@ -153,13 +122,25 @@ pub fn is_direct_run(value: Option<&str>) -> bool {
 }
 
 pub fn usage_lines() -> impl Iterator<Item = &'static str> {
-    COMMANDS.iter().flat_map(|spec| spec.usage.iter().copied())
+    SERVICE_COMMAND_SPECS
+        .iter()
+        .flat_map(|spec| spec.usage.iter().copied())
+        .chain(
+            STATIC_COMMANDS
+                .iter()
+                .flat_map(|spec| spec.usage.iter().copied()),
+        )
 }
 
 pub fn example_lines() -> impl Iterator<Item = &'static str> {
-    COMMANDS
+    SERVICE_COMMAND_SPECS
         .iter()
         .flat_map(|spec| spec.examples.iter().copied())
+        .chain(
+            STATIC_COMMANDS
+                .iter()
+                .flat_map(|spec| spec.examples.iter().copied()),
+        )
 }
 
 pub fn parse_registered_subcommand(args: &[String]) -> Option<Result<CliCommand, ParseOutcome>> {
@@ -174,90 +155,29 @@ pub fn parse_registered_subcommand_for_context(
     // Command modules keep their own parse rules and prompt construction.
     let command = canonical_name(args.first().map(String::as_str))?;
 
-    COMMANDS
+    if ServiceCommandKind::from_name(command).is_some() {
+        return Some(parse_service_command(args, context));
+    }
+
+    STATIC_COMMANDS
         .iter()
         .find(|spec| spec.name == command)
-        .and_then(|spec| spec.parser)
+        .map(|spec| spec.parser)
         .map(|parser| parser(&args[1..], context))
 }
 
-fn parse_service_command<T>(
+fn parse_service_command(
     args: &[String],
     context: Option<&ExecutionContext>,
-    parse_for_context: ServiceParser<T>,
-    parse_default: ServiceParserDefault<T>,
-    wrap: ServiceWrap<T>,
 ) -> Result<CliCommand, ParseOutcome> {
-    let command = match context {
-        Some(context) => parse_for_context(args, context)?,
-        None => parse_default(args)?,
+    let kind = ServiceCommandKind::from_name(args.first().map(String::as_str).unwrap_or_default())
+        .expect("known service command");
+    let context = match context {
+        Some(context) => context.clone(),
+        None => crate::service_command::resolve_context().map_err(ParseOutcome::Error)?,
     };
-    Ok(CliCommand::Service(wrap(command)))
-}
-
-fn parse_audit_command(
-    args: &[String],
-    context: Option<&ExecutionContext>,
-) -> Result<CliCommand, ParseOutcome> {
-    parse_service_command(
-        args,
-        context,
-        crate::audit::parse_args_for_context,
-        crate::audit::parse_args,
-        ServiceCommandDispatch::Audit,
-    )
-}
-
-fn parse_plan_command(
-    args: &[String],
-    context: Option<&ExecutionContext>,
-) -> Result<CliCommand, ParseOutcome> {
-    parse_service_command(
-        args,
-        context,
-        crate::plan::parse_args_for_context,
-        crate::plan::parse_args,
-        ServiceCommandDispatch::Plan,
-    )
-}
-
-fn parse_implementation_audit_command(
-    args: &[String],
-    context: Option<&ExecutionContext>,
-) -> Result<CliCommand, ParseOutcome> {
-    parse_service_command(
-        args,
-        context,
-        crate::implementation_audit::parse_args_for_context,
-        crate::implementation_audit::parse_args,
-        ServiceCommandDispatch::ImplementationAudit,
-    )
-}
-
-fn parse_review_command(
-    args: &[String],
-    context: Option<&ExecutionContext>,
-) -> Result<CliCommand, ParseOutcome> {
-    parse_service_command(
-        args,
-        context,
-        crate::review::parse_args_for_context,
-        crate::review::parse_args,
-        ServiceCommandDispatch::Review,
-    )
-}
-
-fn parse_fix_loop_command(
-    args: &[String],
-    context: Option<&ExecutionContext>,
-) -> Result<CliCommand, ParseOutcome> {
-    parse_service_command(
-        args,
-        context,
-        crate::fix_loop::parse_args_for_context,
-        crate::fix_loop::parse_args,
-        ServiceCommandDispatch::FixLoop,
-    )
+    let dispatch = kind.parse_for_context(&args[1..], &context)?;
+    Ok(CliCommand::Service(dispatch))
 }
 
 pub fn parse_service_subcommand_for_context(
@@ -304,10 +224,11 @@ mod tests {
 
     #[test]
     fn registered_commands_expose_parsers() {
-        for spec in COMMANDS {
+        for spec in registered_commands() {
+            assert!(!spec.usage.is_empty(), "usage missing for {}", spec.name);
             assert!(
-                spec.parser.is_some(),
-                "parser missing for registered command {}",
+                !spec.examples.is_empty(),
+                "examples missing for {}",
                 spec.name
             );
         }

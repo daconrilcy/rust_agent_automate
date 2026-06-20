@@ -1,11 +1,17 @@
+#[path = "automate/artifact_resolution.rs"]
+pub mod artifact_resolution;
+#[path = "automate/loop_control.rs"]
+pub mod loop_control;
 #[path = "automate/step_args.rs"]
 pub mod step_args;
 #[path = "automate/step_outcome.rs"]
 pub mod step_outcome;
+#[path = "automate/transport.rs"]
+mod transport;
 #[path = "automate/workflow_model.rs"]
-pub mod workflow_model;
+mod workflow_model;
 #[path = "automate/workflow_runner.rs"]
-pub mod workflow_runner;
+mod workflow_runner;
 
 use std::path::PathBuf;
 
@@ -17,7 +23,7 @@ pub use step_outcome::{AutomateReport, StepResult};
 #[allow(unused_imports)]
 pub use workflow_model::{
     AutomateCommand, LoopPolicy, RefactorAutomateCommand, Workflow, WorkflowDefaults, WorkflowStep,
-    default_refactor_workflow, load_workflow, parse_workflow, resolve_target_dir,
+    WorkflowStepKind, default_refactor_workflow, load_workflow, parse_workflow, resolve_target_dir,
 };
 #[allow(unused_imports)]
 pub use workflow_runner::run_workflow;

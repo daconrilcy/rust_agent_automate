@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::step_outcome::{
-    AutomateReport, StepExecution, StepResult, WorkflowStepOutcome, command_outcome_for_step,
-    evaluate_clean_stop, run_step,
-};
+use super::artifact_resolution::normalize_artifact_path;
+use super::loop_control::evaluate_clean_stop;
+use super::step_outcome::{AutomateReport, StepExecution, StepResult, run_step};
+use super::transport::{WorkflowStepOutcome, command_outcome_for_step};
 use super::workflow_model::{Workflow, WorkflowStep};
 
 #[derive(Debug, Default)]
@@ -157,49 +156,6 @@ fn validated_command_outcome(
     Ok(outcome)
 }
 
-fn normalize_artifact_path(path: &Path, workspace_root: &Path) -> io::Result<PathBuf> {
-    let workspace_root = fs::canonicalize(workspace_root).map_err(|error| {
-        io::Error::other(format!(
-            "impossible de normaliser le workspace automate {}: {error}",
-            workspace_root.display()
-        ))
-    })?;
-    let resolved = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        workspace_root.join(path)
-    };
-
-    let metadata = fs::metadata(&resolved).map_err(|error| {
-        io::Error::other(format!(
-            "artefact introuvable ou inaccessible {}: {error}",
-            resolved.display()
-        ))
-    })?;
-    if !metadata.is_file() {
-        return Err(io::Error::other(format!(
-            "l'artefact structure doit etre un fichier: {}",
-            resolved.display()
-        )));
-    }
-
-    let normalized = fs::canonicalize(&resolved).map_err(|error| {
-        io::Error::other(format!(
-            "impossible de normaliser l'artefact {}: {error}",
-            resolved.display()
-        ))
-    })?;
-    if !normalized.starts_with(&workspace_root) {
-        return Err(io::Error::other(format!(
-            "l'artefact structure doit rester dans le workspace automate {}: {}",
-            workspace_root.display(),
-            normalized.display()
-        )));
-    }
-
-    Ok(normalized)
-}
-
 fn format_stream(label: &str, content: &str) -> String {
     let content = content.trim();
     if content.is_empty() {
@@ -211,32 +167,17 @@ fn format_stream(label: &str, content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::step_args::resolve_step_args;
     use super::*;
-    use crate::automate::workflow_model::parse_workflow;
-    use std::path::Path;
+    use crate::{CommandOutcome, Workflow, WorkflowStepKind, parse_workflow};
+    use std::cell::RefCell;
+    use std::fs;
+    use std::rc::Rc;
 
     #[test]
     fn format_stream_omits_empty_content() {
         assert_eq!(format_stream("stdout", ""), "");
         assert_eq!(format_stream("stderr", "  "), "");
-    }
-
-    #[test]
-    fn normalizes_relative_artifact_path_from_workspace_root() {
-        let workspace = std::env::temp_dir().join("rust_agent_workflow_runner_relative_artifact");
-        let artifact = workspace.join(".audit").join("audit.md");
-        fs::create_dir_all(artifact.parent().expect("parent")).expect("creation du dossier");
-        fs::write(&artifact, "audit").expect("ecriture de l'artefact");
-
-        let normalized = normalize_artifact_path(Path::new(".audit\\audit.md"), &workspace)
-            .expect("normalisation");
-
-        assert_eq!(
-            normalized,
-            fs::canonicalize(&artifact).expect("chemin canonical")
-        );
-
-        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
@@ -358,5 +299,289 @@ mod tests {
             Some(PathBuf::from("C:\\repo\\.audit\\audit.md"))
         );
         assert_eq!(context.clean_by_step.get("audit"), Some(&true));
+    }
+
+    #[test]
+    fn direct_run_without_structured_outcome_is_reported() {
+        let workflow = parse_workflow(
+            r#"{
+              "defaults": {"model":"gpt-x","reasoning":"medium"},
+              "steps":[{"name":"implementation","rust_command":["audit this repo"],"fresh_codex_call":true}]
+            }"#,
+        )
+        .expect("workflow valide");
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Prompt",
+            Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "implementation terminee".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect("une etape directe doit etre acceptee");
+
+        assert_eq!(report.step_results[0].status_code, Some(0));
+        assert_eq!(report.step_results[0].artifact_path, None);
+    }
+
+    #[test]
+    fn command_outcome_requires_structured_result_for_nested_subcommands() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[{"name":"nested","rust_command":["automate","workflow.json","Prompt"]}]
+            }"#,
+        )
+        .expect("workflow valide");
+        let error = run_workflow_with_executor(
+            &workflow,
+            "Prompt",
+            Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "automate termine".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect_err("une sous-commande imbriquee doit rester structuree");
+
+        assert!(
+            error
+                .to_string()
+                .contains("doit produire un resultat structure")
+        );
+    }
+
+    #[test]
+    fn run_workflow_chains_artifacts_from_structured_outcomes() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[
+                {"name":"audit","rust_command":["audit","--target","{target}"]},
+                {"name":"plan","rust_command":["plan","{artifact:audit}"]}
+              ]
+            }"#,
+        )
+        .expect("workflow valide");
+        let workspace = std::env::temp_dir().join("rust_agent_workflow_chain_artifacts");
+        let audit_artifact = workspace.join(".audit").join("audit.md");
+        let plan_artifact = workspace.join(".plan").join("plan.md");
+        fs::create_dir_all(audit_artifact.parent().expect("parent audit")).expect("dossier audit");
+        fs::create_dir_all(plan_artifact.parent().expect("parent plan")).expect("dossier plan");
+        fs::write(&audit_artifact, "audit").expect("artefact audit");
+        fs::write(&plan_artifact, "plan").expect("artefact plan");
+        let audit_artifact_for_step = audit_artifact.clone();
+        let plan_artifact_for_step = plan_artifact.clone();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let seen = Rc::clone(&calls);
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            &workspace,
+            &workspace,
+            move |workflow, step, context| {
+                seen.borrow_mut()
+                    .push(resolve_step_args(workflow, step, context));
+
+                let artifact_path = match step.name.as_str() {
+                    "audit" => Some(audit_artifact_for_step.clone()),
+                    "plan" => Some(plan_artifact_for_step.clone()),
+                    _ => None,
+                };
+
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    command_outcome: Some(CommandOutcome {
+                        command_name: step.name.clone(),
+                        status_code: Some(0),
+                        final_message_present: true,
+                        artifact_path,
+                        clean: None,
+                    }),
+                })
+            },
+        )
+        .expect("workflow execute");
+
+        assert_eq!(report.completed_cycles, 1);
+        let calls = calls.borrow();
+        assert_eq!(workflow.steps[0].kind, WorkflowStepKind::ServiceCommand);
+        assert_eq!(calls[1][0], "plan");
+        assert_eq!(
+            calls[1][1],
+            fs::canonicalize(&audit_artifact)
+                .expect("artefact canonical")
+                .display()
+                .to_string()
+        );
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn run_workflow_rejects_missing_structured_outcome() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let error = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "Plan enregistre dans C:\\repo\\.audit\\audit.md".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect_err("un resultat structure est requis");
+
+        assert!(
+            error
+                .to_string()
+                .contains("doit produire un resultat structure")
+        );
+    }
+
+    #[test]
+    fn run_workflow_accepts_direct_run_without_structured_outcome() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"implementation","rust_command":["--mode","exec","Implement"]}]}"#,
+        )
+        .expect("workflow valide");
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
+            |_workflow, _step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: "implementation terminee".to_string(),
+                    stderr: String::new(),
+                    command_outcome: None,
+                })
+            },
+        )
+        .expect("une etape directe n'a pas d'artefact structure");
+
+        assert_eq!(report.completed_cycles, 1);
+        assert_eq!(report.step_results[0].status_code, Some(0));
+        assert_eq!(report.step_results[0].artifact_path, None);
+    }
+
+    #[test]
+    fn run_workflow_uses_structured_clean_status_for_loop_stop() {
+        let workflow: Workflow = parse_workflow(
+            r#"{
+              "steps":[
+                {"name":"alignment_audit","rust_command":["implementation-audit","plan.md"]},
+                {"name":"commit","rust_command":["--mode","exec","Commit"]}
+              ],
+              "loop_policy":{"audit_step":"alignment_audit","max_cycles":3}
+            }"#,
+        )
+        .expect("workflow valide");
+
+        let workspace = std::env::temp_dir().join("rust_agent_workflow_loop_stop");
+        let artifact = workspace.join(".audit").join("artifact.md");
+        fs::create_dir_all(artifact.parent().expect("parent")).expect("dossier audit");
+        fs::write(&artifact, "artifact").expect("artefact audit");
+        let calls = Rc::new(RefCell::new(0_u32));
+        let seen = Rc::clone(&calls);
+
+        let report = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            &workspace,
+            &workspace,
+            move |_workflow, step, _context| {
+                *seen.borrow_mut() += 1;
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    command_outcome: Some(CommandOutcome {
+                        command_name: step.name.clone(),
+                        status_code: Some(0),
+                        final_message_present: true,
+                        artifact_path: Some(artifact.clone()),
+                        clean: (step.name == "alignment_audit").then_some(true),
+                    }),
+                })
+            },
+        )
+        .expect("workflow execute");
+
+        assert!(report.clean_stop);
+        assert_eq!(report.completed_cycles, 1);
+        assert_eq!(*calls.borrow(), 2);
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn run_workflow_rejects_loop_audit_without_structured_clean_status() {
+        let workflow: Workflow = parse_workflow(
+            r#"{
+              "steps":[
+                {"name":"alignment_audit","rust_command":["implementation-audit","plan.md"]}
+              ],
+              "loop_policy":{"audit_step":"alignment_audit","max_cycles":2}
+            }"#,
+        )
+        .expect("workflow valide");
+
+        let workspace = std::env::temp_dir().join("rust_agent_workflow_missing_clean");
+        let artifact = workspace.join(".audit").join("artifact.md");
+        fs::create_dir_all(artifact.parent().expect("parent")).expect("dossier audit");
+        fs::write(&artifact, "artifact").expect("artefact audit");
+        let error = run_workflow_with_executor(
+            &workflow,
+            "Durcir",
+            &workspace,
+            &workspace,
+            move |_workflow, step, _context| {
+                Ok(StepExecution {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    command_outcome: Some(CommandOutcome {
+                        command_name: step.name.clone(),
+                        status_code: Some(0),
+                        final_message_present: true,
+                        artifact_path: Some(artifact.clone()),
+                        clean: None,
+                    }),
+                })
+            },
+        )
+        .expect_err("loop_policy doit exiger un statut clean structure");
+
+        assert!(error.to_string().contains("statut clean"));
+        let _ = fs::remove_dir_all(workspace);
     }
 }

@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{ParseOutcome, next_value};
+use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
     self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
 };
@@ -34,20 +36,20 @@ pub fn resolve_audit_file(
 }
 
 pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path) -> String {
-    format!(
-        concat!(
-            "Use $refactor-plan-from-audit to convert the audit at \"{}\" into an implementation-ready integration plan.\n",
-            "The plan must use the central Codex skill named refactor-plan-from-audit, follow its SKILL.md instructions, ",
-            "and use references/plan-template.md as the output structure.\n",
-            "The current local workspace running this command is \"{}\" and the final plan will be saved by the wrapper under \"{}\".\n",
-            "Read the audit completely from the provided path. Inspect the local workspace only enough to make the plan concrete.\n",
-            "Do not modify source code. Produce the final answer as a complete Markdown implementation handoff plan only.\n",
-            "Include the source audit path, target workspace, prioritized phases, task backlog, traceability matrix, verification matrix, ",
-            "decision gates, out-of-scope section, rollback or fallback notes, and the first prompt for the implementation agent."
+    render_structured_prompt(
+        &format!(
+            "Use $refactor-plan-from-audit to convert the audit at \"{}\" into an implementation-ready integration plan.\nThe plan must use the central Codex skill named refactor-plan-from-audit, follow its SKILL.md instructions, and use references/plan-template.md as the output structure.",
+            audit_path.display()
         ),
-        audit_path.display(),
-        workspace_root.display(),
-        output_dir.display()
+        workspace_root,
+        output_dir,
+        "final plan",
+        &[PromptSection {
+            heading: Cow::Borrowed(""),
+            body: Cow::Borrowed(
+                "Read the audit completely from the provided path. Inspect the local workspace only enough to make the plan concrete.\nDo not modify source code. Produce the final answer as a complete Markdown implementation handoff plan only.\nInclude the source audit path, target workspace, prioritized phases, task backlog, traceability matrix, verification matrix, decision gates, out-of-scope section, rollback or fallback notes, and the first prompt for the implementation agent.",
+            ),
+        }],
     )
 }
 
@@ -76,6 +78,7 @@ pub fn run_silently(
     service_command::execute_service_command_silently(&command.service, PLAN_DESCRIPTOR, save_plan)
 }
 
+#[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     parse_args_for_context(args, &context)
@@ -160,6 +163,7 @@ mod tests {
         assert!(prompt.contains("references/plan-template.md"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.audit\\audit.md"));
         assert!(prompt.contains("C:\\dev\\rust_agent"));
+        assert!(prompt.contains("final plan will be saved by the wrapper"));
         assert!(prompt.contains("C:\\dev\\rust_agent\\.plan"));
         assert!(prompt.contains("complete Markdown implementation handoff plan only"));
     }

@@ -1,8 +1,12 @@
+#![allow(dead_code)]
+
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use app::{CliCommand, CodexRequest, ParseOutcome, parse_args};
 
 pub fn temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -85,6 +89,41 @@ fn main() {
 
 pub fn build_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_app"))
+}
+
+pub fn normalize_path(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+        .replace("\\\\?\\", "")
+}
+
+pub fn parse(input: &[&str]) -> Result<CliCommand, ParseOutcome> {
+    let args = input
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+    parse_args(&args)
+}
+
+pub fn request_for(command: &CliCommand) -> &CodexRequest {
+    match command {
+        CliCommand::Run(request) => request,
+        CliCommand::Service(command) => command.request(),
+        CliCommand::Automate(_) | CliCommand::RefactorAutomate(_) => {
+            panic!("les automates ne portent pas de requete Codex directe")
+        }
+    }
+}
+
+pub fn command_kind(command: &CliCommand) -> &'static str {
+    match command {
+        CliCommand::Run(_) => "run",
+        CliCommand::Service(command) => command.command_name(),
+        CliCommand::Automate(_) => "automate",
+        CliCommand::RefactorAutomate(_) => "refactor-automate",
+    }
 }
 
 pub fn join_path_dirs<I>(dirs: I) -> OsString

@@ -34,16 +34,6 @@ pub fn prepare_service_command(
     }
 }
 
-pub fn prepare_parse_context(
-    options: &ServiceCommandOptions,
-    descriptor: ServiceCommandDescriptor<'_>,
-) -> Result<PreparedParseContext, String> {
-    let context = resolve_context()?;
-    Ok(prepare_parse_context_for_context(
-        options, descriptor, context,
-    ))
-}
-
 pub fn prepare_parse_context_for_context(
     options: &ServiceCommandOptions,
     descriptor: ServiceCommandDescriptor<'_>,

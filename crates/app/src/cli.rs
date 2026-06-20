@@ -23,10 +23,7 @@ impl CliCommand {
     pub fn execute(self) -> i32 {
         match self {
             Self::Run(request) => run_request(&request),
-            Self::Service(command) => {
-                run_service_command(command.execute());
-                0
-            }
+            Self::Service(command) => run_service_command(command.execute()),
             Self::Automate(command) => run_automate(&command),
             Self::RefactorAutomate(command) => run_refactor_automate(&command),
         }
@@ -153,10 +150,10 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
 
 fn run_service_command(
     result: Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure>,
-) {
-    if let Err(error) = result {
-        let code = service_command_exit_code(&error);
-        std::process::exit(code);
+) -> i32 {
+    match result {
+        Ok(report) => crate::codex::process_exit_code(Some(report.status_code)),
+        Err(error) => service_command_exit_code(&error),
     }
 }
 
@@ -258,8 +255,9 @@ fn run_automate_workflow(
 
 #[cfg(test)]
 mod tests {
-    use super::service_command_exit_code;
-    use crate::reporting::ReportFailure;
+    use super::{run_service_command, service_command_exit_code};
+    use crate::reporting::{CommandOutcome, CompletedReport, ReportFailure};
+    use std::path::PathBuf;
 
     #[test]
     fn missing_final_message_uses_codex_status_code_mapping() {
@@ -297,6 +295,26 @@ mod tests {
             clean: Some(false),
             error: "disk full".to_string(),
         });
+
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn service_command_success_uses_completed_report_status_code_mapping() {
+        let code = run_service_command(Ok(CompletedReport {
+            status_code: -1,
+            stdout: String::new(),
+            stderr: String::new(),
+            message: "rapport".to_string(),
+            saved_path: PathBuf::from("C:\\repo\\.audit\\audit.md"),
+            outcome: CommandOutcome {
+                command_name: "audit".to_string(),
+                status_code: Some(-1),
+                final_message_present: true,
+                artifact_path: None,
+                clean: None,
+            },
+        }));
 
         assert_eq!(code, 1);
     }

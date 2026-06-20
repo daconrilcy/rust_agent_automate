@@ -3,3 +3,5 @@
 .audit/
 .fix-loop/
 .plan/
+.cargo-target-verify*/
+.cargo-target-loop*/

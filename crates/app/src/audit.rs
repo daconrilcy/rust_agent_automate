@@ -4,18 +4,26 @@ use std::time::Duration;
 
 use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
-use crate::codex::CodexRequest;
-use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
+use crate::service_command::{
+    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+};
 use crate::service_paths::{self, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuditCommand {
-    pub request: CodexRequest,
+    pub service: PreparedServiceCommand,
     pub workspace_root: PathBuf,
     pub target_dir: PathBuf,
-    pub output_dir: PathBuf,
-    pub timeout: Duration,
 }
+
+const AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+    default_output_dir: ".audit",
+    command_name: "audit",
+    saved_label: "audit",
+    final_label: "audit",
+    missing_message_label: "rapport d'audit",
+    clean_detector: None,
+};
 
 pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path) -> String {
     format!(
@@ -55,23 +63,15 @@ pub fn resolve_target_dir(
 }
 
 pub fn run(command: &AuditCommand) {
-    service_command::run_service_command(
-        &command.request,
-        command.timeout,
-        ServiceRunSpec {
-            intro: format!(
-                "Audit Codex en cours sur {} (timeout: {} secondes)...",
-                command.target_dir.display(),
-                command.timeout.as_secs()
-            ),
-            command_name: "audit",
-            saved_label: "audit",
-            final_label: "audit",
-            missing_message_label: "rapport d'audit",
-            output_dir: &command.output_dir,
-            save: save_report,
-            clean_detector: None,
-        },
+    service_command::execute_service_command(
+        &command.service,
+        AUDIT_DESCRIPTOR,
+        format!(
+            "Audit Codex en cours sur {} (timeout: {} secondes)...",
+            command.target_dir.display(),
+            command.service.timeout.as_secs()
+        ),
+        save_report,
     );
 }
 
@@ -104,15 +104,16 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         &context,
     )
     .map_err(ParseOutcome::Error)?;
-    let output_dir = service_command::resolve_output_dir(&common, &context, ".audit");
-    let prompt = build_prompt(&workspace_root, &target_dir, &output_dir);
+    let preview_output_dir =
+        service_command::resolve_output_dir(&common, &context, AUDIT_DESCRIPTOR.default_output_dir);
+    let prompt = build_prompt(&workspace_root, &target_dir, &preview_output_dir);
+    let service =
+        service_command::prepare_service_command(&common, &context, AUDIT_DESCRIPTOR, prompt);
 
     Ok(AuditCommand {
-        request: common.build_request(prompt),
+        service,
         workspace_root,
         target_dir,
-        output_dir,
-        timeout: common.timeout,
     })
 }
 

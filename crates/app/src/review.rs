@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
-use crate::codex::CodexRequest;
-use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
+use crate::service_command::{
+    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+};
 use crate::service_paths::{self, PathRequirement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,13 +65,20 @@ impl std::str::FromStr for ReviewSubject {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReviewCommand {
-    pub request: CodexRequest,
+    pub service: PreparedServiceCommand,
     pub workspace_root: PathBuf,
     pub subject: ReviewSubject,
     pub artifact_path: PathBuf,
-    pub output_dir: PathBuf,
-    pub timeout: Duration,
 }
+
+const REVIEW_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+    default_output_dir: ".review",
+    command_name: "review",
+    saved_label: "review",
+    final_label: "review",
+    missing_message_label: "review",
+    clean_detector: None,
+};
 
 pub fn resolve_artifact_path(
     subject: ReviewSubject,
@@ -130,24 +138,16 @@ pub fn save_review(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 }
 
 pub fn run(command: &ReviewCommand) {
-    service_command::run_service_command(
-        &command.request,
-        command.timeout,
-        ServiceRunSpec {
-            intro: format!(
-                "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
-                command.subject,
-                command.artifact_path.display(),
-                command.timeout.as_secs()
-            ),
-            command_name: "review",
-            saved_label: "review",
-            final_label: "review",
-            missing_message_label: "review",
-            output_dir: &command.output_dir,
-            save: save_review,
-            clean_detector: None,
-        },
+    service_command::execute_service_command(
+        &command.service,
+        REVIEW_DESCRIPTOR,
+        format!(
+            "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
+            command.subject,
+            command.artifact_path.display(),
+            command.service.timeout.as_secs()
+        ),
+        save_review,
     );
 }
 
@@ -210,16 +210,25 @@ pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
     let workspace_root = context.workspace_root().to_path_buf();
     let artifact_path =
         resolve_artifact_path(subject, artifact_path, &context).map_err(ParseOutcome::Error)?;
-    let output_dir = service_command::resolve_output_dir(&common, &context, ".review");
-    let prompt = build_prompt(&workspace_root, subject, &artifact_path, &output_dir);
+    let preview_output_dir = service_command::resolve_output_dir(
+        &common,
+        &context,
+        REVIEW_DESCRIPTOR.default_output_dir,
+    );
+    let prompt = build_prompt(
+        &workspace_root,
+        subject,
+        &artifact_path,
+        &preview_output_dir,
+    );
+    let service =
+        service_command::prepare_service_command(&common, &context, REVIEW_DESCRIPTOR, prompt);
 
     Ok(ReviewCommand {
-        request: common.build_request(prompt),
+        service,
         workspace_root,
         subject,
         artifact_path,
-        output_dir,
-        timeout: common.timeout,
     })
 }
 

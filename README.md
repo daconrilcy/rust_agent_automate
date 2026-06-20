@@ -72,9 +72,9 @@ Champs d'etape:
 - `reasoning`: `low`, `medium`, `high`, ou `null` pour le reasoning par defaut
 - `fresh_codex_call`: indique si l'etape repart d'un appel Codex vierge ou depend du contexte precedent
 
-Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`.
+Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`. Les references `{artifact:<nom_etape>}` doivent viser une etape precedente qui produit un resultat structure.
 
-`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter si l'audit d'alignement ne contient pas de marqueur de sortie propre.
+`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter uniquement si l'etape `alignment_audit` ne publie pas un statut structure `clean: true`.
 
 ## Exemples
 

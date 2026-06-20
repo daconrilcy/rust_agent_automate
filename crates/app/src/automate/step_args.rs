@@ -1,7 +1,6 @@
 use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use crate::command_registry;
 
-use super::workflow_model::{Workflow, WorkflowStep};
+use super::workflow_model::{Workflow, WorkflowStep, WorkflowStepKind};
 use super::workflow_runner::RunContext;
 
 pub fn resolve_step_args(
@@ -28,7 +27,7 @@ pub fn resolve_step_args(
         args.push(expand_placeholders(value, context));
     }
 
-    if command_accepts_codex_options(&args) {
+    if matches!(step.kind, WorkflowStepKind::ServiceCommand) {
         if !step.fresh_codex_call {
             args.push("--continue-codex".to_string());
         }
@@ -40,7 +39,7 @@ pub fn resolve_step_args(
             "--timeout-seconds".to_string(),
             timeout_seconds.to_string(),
         ]);
-    } else if command_is_direct_run(&args) {
+    } else if matches!(step.kind, WorkflowStepKind::DirectRun) {
         if !step.fresh_codex_call {
             args.insert(0, "--continue-codex".to_string());
         }
@@ -56,16 +55,6 @@ pub fn resolve_step_args(
     }
 
     args
-}
-
-fn command_accepts_codex_options(args: &[String]) -> bool {
-    args.first()
-        .map(String::as_str)
-        .is_some_and(command_registry::accepts_codex_options)
-}
-
-fn command_is_direct_run(args: &[String]) -> bool {
-    command_registry::is_direct_run(args.first().map(String::as_str))
 }
 
 fn expand_placeholders(value: &str, context: &RunContext) -> String {

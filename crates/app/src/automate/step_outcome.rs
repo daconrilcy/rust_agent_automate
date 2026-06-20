@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::codex;
 use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome};
 
-use super::workflow_model::{LoopPolicy, Workflow, WorkflowStep};
+use super::workflow_model::{LoopPolicy, Workflow, WorkflowStep, WorkflowStepKind};
 use super::workflow_runner::RunContext;
 
 #[derive(Debug)]
@@ -77,9 +77,9 @@ pub fn run_step(
 }
 
 pub fn command_outcome_for_step(
-    workflow: &Workflow,
+    _workflow: &Workflow,
     step: &WorkflowStep,
-    context: &RunContext,
+    _context: &RunContext,
     output: &StepExecution,
 ) -> io::Result<CommandOutcome> {
     if let Some(outcome) = &output.command_outcome {
@@ -88,11 +88,7 @@ pub fn command_outcome_for_step(
         return Ok(outcome);
     }
 
-    if crate::automate::step_args::resolve_step_args(workflow, step, context)
-        .first()
-        .map(String::as_str)
-        .is_some_and(|value| crate::command_registry::is_direct_run(Some(value)))
-    {
+    if matches!(step.kind, WorkflowStepKind::DirectRun) {
         return Ok(CommandOutcome {
             command_name: step.name.clone(),
             status_code: normalized_status_code(output.status_code),
@@ -109,6 +105,8 @@ pub fn command_outcome_for_step(
 }
 
 pub fn evaluate_clean_stop(policy: &LoopPolicy, context: &RunContext) -> io::Result<bool> {
+    // Loop termination is driven by the structured `clean` status emitted by
+    // the configured audit step, not by parsing free-form markdown output.
     if let Some(clean) = context.clean_by_step.get(&policy.audit_step).copied() {
         return Ok(clean);
     }

@@ -118,6 +118,8 @@ fn validated_command_outcome(
     context: &RunContext,
     output: &StepExecution,
 ) -> io::Result<crate::reporting::CommandOutcome> {
+    // Workflow validation decides which steps may omit structured output and
+    // artifact paths are normalized here before later placeholder expansion.
     let mut outcome = command_outcome_for_step(workflow, step, context, output)?;
     if let Some(path) = outcome.artifact_path.take() {
         outcome.artifact_path = Some(normalize_artifact_path(&path, &context.workspace_root)?);

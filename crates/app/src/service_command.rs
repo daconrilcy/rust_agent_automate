@@ -54,6 +54,24 @@ pub struct ServiceRunSpec<'a> {
     pub clean_detector: Option<fn(&str) -> bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedServiceCommand {
+    pub request: CodexRequest,
+    pub workspace_root: PathBuf,
+    pub output_dir: PathBuf,
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceCommandDescriptor<'a> {
+    pub default_output_dir: &'a str,
+    pub command_name: &'a str,
+    pub saved_label: &'a str,
+    pub final_label: &'a str,
+    pub missing_message_label: &'a str,
+    pub clean_detector: Option<fn(&str) -> bool>,
+}
+
 pub fn parse_common_option(
     args: &[String],
     index: usize,
@@ -129,6 +147,42 @@ pub fn resolve_output_dir(
     default_dir_name: &str,
 ) -> PathBuf {
     service_paths::resolve_output_dir(options.output_dir.clone(), context, default_dir_name)
+}
+
+pub fn prepare_service_command(
+    options: &ServiceCommandOptions,
+    context: &ExecutionContext,
+    descriptor: ServiceCommandDescriptor<'_>,
+    prompt: String,
+) -> PreparedServiceCommand {
+    PreparedServiceCommand {
+        request: options.build_request(prompt),
+        workspace_root: context.workspace_root().to_path_buf(),
+        output_dir: resolve_output_dir(options, context, descriptor.default_output_dir),
+        timeout: options.timeout,
+    }
+}
+
+pub fn execute_service_command(
+    command: &PreparedServiceCommand,
+    descriptor: ServiceCommandDescriptor<'_>,
+    intro: String,
+    save: fn(&Path, &str) -> io::Result<PathBuf>,
+) {
+    run_service_command(
+        &command.request,
+        command.timeout,
+        ServiceRunSpec {
+            intro,
+            command_name: descriptor.command_name,
+            saved_label: descriptor.saved_label,
+            final_label: descriptor.final_label,
+            missing_message_label: descriptor.missing_message_label,
+            output_dir: &command.output_dir,
+            save,
+            clean_detector: descriptor.clean_detector,
+        },
+    );
 }
 
 pub fn run_service_command(request: &CodexRequest, timeout: Duration, spec: ServiceRunSpec<'_>) {

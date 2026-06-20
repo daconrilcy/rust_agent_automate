@@ -30,11 +30,11 @@ fn parse(input: &[&str]) -> Result<CliCommand, ParseOutcome> {
 fn request_for(command: &CliCommand) -> &CodexRequest {
     match command {
         CliCommand::Run(request) => request,
-        CliCommand::Audit(command) => &command.request,
-        CliCommand::Plan(command) => &command.request,
-        CliCommand::ImplementationAudit(command) => &command.request,
-        CliCommand::Review(command) => &command.request,
-        CliCommand::FixLoop(command) => &command.request,
+        CliCommand::Audit(command) => &command.service.request,
+        CliCommand::Plan(command) => &command.service.request,
+        CliCommand::ImplementationAudit(command) => &command.service.request,
+        CliCommand::Review(command) => &command.service.request,
+        CliCommand::FixLoop(command) => &command.service.request,
         CliCommand::Automate(_) | CliCommand::RefactorAutomate(_) => {
             panic!("les automates ne portent pas de requete Codex directe")
         }
@@ -253,16 +253,19 @@ fn parses_audit_command() {
         panic!("la commande attendue est audit");
     };
 
-    assert_eq!(audit.request.mode, CodexMode::Exec);
-    assert_eq!(audit.request.model, DEFAULT_MODEL);
-    assert_eq!(audit.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
-    assert!(audit.request.verbose);
+    assert_eq!(audit.service.request.mode, CodexMode::Exec);
+    assert_eq!(audit.service.request.model, DEFAULT_MODEL);
+    assert_eq!(
+        audit.service.request.reasoning_effort,
+        DEFAULT_REASONING_EFFORT
+    );
+    assert!(audit.service.request.verbose);
     assert_eq!(
         normalize_path(&audit.target_dir),
         normalize_path(&audit.workspace_root)
     );
-    assert!(audit.output_dir.ends_with(".audit"));
-    assert_eq!(audit.timeout, Duration::from_secs(900));
+    assert!(audit.service.output_dir.ends_with(".audit"));
+    assert_eq!(audit.service.timeout, Duration::from_secs(900));
 }
 
 #[test]
@@ -273,7 +276,7 @@ fn parses_audit_timeout_argument() {
         panic!("la commande attendue est audit");
     };
 
-    assert_eq!(audit.timeout, Duration::from_secs(42));
+    assert_eq!(audit.service.timeout, Duration::from_secs(42));
 }
 
 #[test]
@@ -310,11 +313,14 @@ fn parses_plan_command_with_positional_audit_path() {
         panic!("la commande attendue est plan");
     };
 
-    assert_eq!(plan.request.mode, CodexMode::Exec);
-    assert_eq!(plan.request.model, DEFAULT_MODEL);
-    assert_eq!(plan.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
-    assert!(plan.output_dir.ends_with(".plan"));
-    assert_eq!(plan.timeout, Duration::from_secs(900));
+    assert_eq!(plan.service.request.mode, CodexMode::Exec);
+    assert_eq!(plan.service.request.model, DEFAULT_MODEL);
+    assert_eq!(
+        plan.service.request.reasoning_effort,
+        DEFAULT_REASONING_EFFORT
+    );
+    assert!(plan.service.output_dir.ends_with(".plan"));
+    assert_eq!(plan.service.timeout, Duration::from_secs(900));
 }
 
 #[test]
@@ -326,11 +332,14 @@ fn parses_implementation_audit_command_with_positional_plan_path() {
         panic!("la commande attendue est implementation-audit");
     };
 
-    assert_eq!(audit.request.mode, CodexMode::Exec);
-    assert_eq!(audit.request.model, DEFAULT_MODEL);
-    assert_eq!(audit.request.reasoning_effort, DEFAULT_REASONING_EFFORT);
-    assert!(audit.output_dir.ends_with(".audit"));
-    assert_eq!(audit.timeout, Duration::from_secs(900));
+    assert_eq!(audit.service.request.mode, CodexMode::Exec);
+    assert_eq!(audit.service.request.model, DEFAULT_MODEL);
+    assert_eq!(
+        audit.service.request.reasoning_effort,
+        DEFAULT_REASONING_EFFORT
+    );
+    assert!(audit.service.output_dir.ends_with(".audit"));
+    assert_eq!(audit.service.timeout, Duration::from_secs(900));
     assert!(audit.implementation_path.is_none());
 }
 
@@ -352,8 +361,8 @@ fn parses_implementation_audit_command_with_named_options() {
         panic!("la commande attendue est implementation-audit");
     };
 
-    assert_eq!(audit.timeout, Duration::from_secs(42));
-    assert!(audit.request.verbose);
+    assert_eq!(audit.service.timeout, Duration::from_secs(42));
+    assert!(audit.service.request.verbose);
     assert!(
         audit
             .implementation_path
@@ -370,10 +379,10 @@ fn parses_review_command_with_positional_type_and_artifact() {
         panic!("la commande attendue est review");
     };
 
-    assert_eq!(review.request.mode, CodexMode::Exec);
+    assert_eq!(review.service.request.mode, CodexMode::Exec);
     assert_eq!(review.subject, ReviewSubject::Implementation);
-    assert!(review.output_dir.ends_with(".review"));
-    assert_eq!(review.timeout, Duration::from_secs(900));
+    assert!(review.service.output_dir.ends_with(".review"));
+    assert_eq!(review.service.timeout, Duration::from_secs(900));
 }
 
 #[test]
@@ -395,8 +404,8 @@ fn parses_review_command_with_named_type_and_artifact() {
     };
 
     assert_eq!(review.subject, ReviewSubject::Audit);
-    assert_eq!(review.timeout, Duration::from_secs(42));
-    assert!(review.request.verbose);
+    assert_eq!(review.service.timeout, Duration::from_secs(42));
+    assert!(review.service.request.verbose);
 }
 
 #[test]
@@ -407,10 +416,10 @@ fn parses_fix_loop_command_with_positional_type_and_artifact() {
         panic!("la commande attendue est fix-loop");
     };
 
-    assert_eq!(fix_loop.request.mode, CodexMode::Exec);
+    assert_eq!(fix_loop.service.request.mode, CodexMode::Exec);
     assert_eq!(fix_loop.input_kind, ReviewSubject::Plan);
-    assert!(fix_loop.output_dir.ends_with(".fix-loop"));
-    assert_eq!(fix_loop.timeout, Duration::from_secs(1800));
+    assert!(fix_loop.service.output_dir.ends_with(".fix-loop"));
+    assert_eq!(fix_loop.service.timeout, Duration::from_secs(1800));
 }
 
 #[test]
@@ -432,8 +441,8 @@ fn parses_fix_loop_alias_with_named_type_and_artifact() {
     };
 
     assert_eq!(fix_loop.input_kind, ReviewSubject::Implementation);
-    assert_eq!(fix_loop.timeout, Duration::from_secs(42));
-    assert!(fix_loop.request.verbose);
+    assert_eq!(fix_loop.service.timeout, Duration::from_secs(42));
+    assert!(fix_loop.service.request.verbose);
 }
 
 #[test]

@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use crate::command_registry;
 use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -56,6 +58,8 @@ impl Default for WorkflowDefaults {
 pub struct WorkflowStep {
     pub name: String,
     pub rust_command: Vec<String>,
+    #[serde(skip, default)]
+    pub kind: WorkflowStepKind,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -64,6 +68,19 @@ pub struct WorkflowStep {
     pub fresh_codex_call: bool,
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub enum WorkflowStepKind {
+    ServiceCommand,
+    NestedCommand,
+    DirectRun,
+}
+
+impl Default for WorkflowStepKind {
+    fn default() -> Self {
+        Self::DirectRun
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -104,28 +121,121 @@ fn validate_workflow(workflow: Workflow) -> Result<Workflow, String> {
         return Err("le workflow doit definir au moins une etape".to_string());
     }
 
-    for step in &workflow.steps {
+    let mut workflow = workflow;
+
+    let mut seen_names = BTreeSet::new();
+
+    for step in &mut workflow.steps {
         if step.name.trim().is_empty() {
             return Err("chaque etape doit avoir un nom non vide".to_string());
         }
         if step.rust_command.is_empty() {
             return Err(format!("l'etape '{}' doit definir rust_command", step.name));
         }
+        if !seen_names.insert(step.name.clone()) {
+            return Err(format!(
+                "le nom d'etape '{}' doit etre unique dans le workflow",
+                step.name
+            ));
+        }
+
+        step.kind = classify_step_kind(&step.rust_command);
     }
 
-    if let Some(policy) = &workflow.loop_policy
-        && !workflow
+    validate_artifact_references(&workflow)?;
+
+    if let Some(policy) = &workflow.loop_policy {
+        let Some(audit_step) = workflow
             .steps
             .iter()
-            .any(|step| step.name == policy.audit_step)
-    {
-        return Err(format!(
-            "loop_policy.audit_step '{}' ne correspond a aucune etape",
-            policy.audit_step
-        ));
+            .find(|step| step.name == policy.audit_step)
+        else {
+            return Err(format!(
+                "loop_policy.audit_step '{}' ne correspond a aucune etape",
+                policy.audit_step
+            ));
+        };
+
+        if matches!(audit_step.kind, WorkflowStepKind::DirectRun) {
+            return Err(format!(
+                "loop_policy.audit_step '{}' doit etre une commande structuree, pas une execution directe",
+                policy.audit_step
+            ));
+        }
     }
 
     Ok(workflow)
+}
+
+fn validate_artifact_references(workflow: &Workflow) -> Result<(), String> {
+    for (index, step) in workflow.steps.iter().enumerate() {
+        for referenced_step in referenced_artifacts(&step.rust_command) {
+            let Some(referenced_index) = workflow
+                .steps
+                .iter()
+                .position(|candidate| candidate.name == referenced_step)
+            else {
+                return Err(format!(
+                    "l'etape '{}' reference un artefact inconnu '{}'",
+                    step.name, referenced_step
+                ));
+            };
+
+            if referenced_index >= index {
+                return Err(format!(
+                    "l'etape '{}' reference l'artefact futur '{}' avant sa production",
+                    step.name, referenced_step
+                ));
+            }
+
+            if matches!(
+                workflow.steps[referenced_index].kind,
+                WorkflowStepKind::DirectRun
+            ) {
+                return Err(format!(
+                    "l'etape '{}' reference l'artefact '{}' mais cette etape est une execution directe sans resultat structure",
+                    step.name, referenced_step
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn referenced_artifacts(command: &[String]) -> Vec<&str> {
+    let mut references = Vec::new();
+
+    for value in command {
+        let mut remainder = value.as_str();
+        while let Some(start) = remainder.find("{artifact:") {
+            let suffix = &remainder[start + "{artifact:".len()..];
+            let Some(end) = suffix.find('}') else {
+                break;
+            };
+            let candidate = &suffix[..end];
+            if !candidate.is_empty() {
+                references.push(candidate);
+            }
+            remainder = &suffix[end + 1..];
+        }
+    }
+
+    references
+}
+
+fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
+    let Some(first) = rust_command.first().map(String::as_str) else {
+        return WorkflowStepKind::DirectRun;
+    };
+
+    if command_registry::accepts_codex_options(first) {
+        WorkflowStepKind::ServiceCommand
+    } else if command_registry::is_direct_run(Some(first)) {
+        WorkflowStepKind::DirectRun
+    } else {
+        WorkflowStepKind::NestedCommand
+    }
 }
 
 fn default_max_cycles() -> u32 {

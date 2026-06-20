@@ -4,20 +4,29 @@ use std::time::Duration;
 
 use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
-use crate::codex::CodexRequest;
 use crate::reporting;
-use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
+use crate::service_command::{
+    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+};
 use crate::service_paths::{self, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ImplementationAuditCommand {
-    pub request: CodexRequest,
+    pub service: PreparedServiceCommand,
     pub workspace_root: PathBuf,
     pub plan_path: PathBuf,
     pub implementation_path: Option<PathBuf>,
-    pub output_dir: PathBuf,
-    pub timeout: Duration,
 }
+
+const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'static> =
+    ServiceCommandDescriptor {
+        default_output_dir: ".audit",
+        command_name: "implementation-audit",
+        saved_label: "audit d'implementation",
+        final_label: "audit d'implementation",
+        missing_message_label: "audit d'implementation",
+        clean_detector: Some(reporting::detect_clean_implementation_audit),
+    };
 
 pub fn resolve_plan_file(
     path: PathBuf,
@@ -90,24 +99,16 @@ pub fn run(command: &ImplementationAuditCommand) {
         |path| path.display().to_string(),
     );
 
-    service_command::run_service_command(
-        &command.request,
-        command.timeout,
-        ServiceRunSpec {
-            intro: format!(
-                "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
-                command.plan_path.display(),
-                scope,
-                command.timeout.as_secs()
-            ),
-            command_name: "implementation-audit",
-            saved_label: "audit d'implementation",
-            final_label: "audit d'implementation",
-            missing_message_label: "audit d'implementation",
-            output_dir: &command.output_dir,
-            save: save_audit,
-            clean_detector: Some(reporting::detect_clean_implementation_audit),
-        },
+    service_command::execute_service_command(
+        &command.service,
+        IMPLEMENTATION_AUDIT_DESCRIPTOR,
+        format!(
+            "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
+            command.plan_path.display(),
+            scope,
+            command.service.timeout.as_secs()
+        ),
+        save_audit,
     );
 }
 
@@ -165,21 +166,29 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
         .map(|path| resolve_implementation_path(path, &context))
         .transpose()
         .map_err(ParseOutcome::Error)?;
-    let output_dir = service_command::resolve_output_dir(&common, &context, ".audit");
+    let preview_output_dir = service_command::resolve_output_dir(
+        &common,
+        &context,
+        IMPLEMENTATION_AUDIT_DESCRIPTOR.default_output_dir,
+    );
     let prompt = build_prompt(
         &workspace_root,
         &plan_path,
         implementation_path.as_deref(),
-        &output_dir,
+        &preview_output_dir,
+    );
+    let service = service_command::prepare_service_command(
+        &common,
+        &context,
+        IMPLEMENTATION_AUDIT_DESCRIPTOR,
+        prompt,
     );
 
     Ok(ImplementationAuditCommand {
-        request: common.build_request(prompt),
+        service,
         workspace_root,
         plan_path,
         implementation_path,
-        output_dir,
-        timeout: common.timeout,
     })
 }
 

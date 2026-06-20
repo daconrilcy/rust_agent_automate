@@ -4,18 +4,26 @@ use std::time::Duration;
 
 use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
-use crate::codex::CodexRequest;
-use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
+use crate::service_command::{
+    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+};
 use crate::service_paths::{self, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlanCommand {
-    pub request: CodexRequest,
+    pub service: PreparedServiceCommand,
     pub workspace_root: PathBuf,
     pub audit_path: PathBuf,
-    pub output_dir: PathBuf,
-    pub timeout: Duration,
 }
+
+const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+    default_output_dir: ".plan",
+    command_name: "plan",
+    saved_label: "plan",
+    final_label: "plan",
+    missing_message_label: "plan",
+    clean_detector: None,
+};
 
 pub fn resolve_audit_file(
     path: PathBuf,
@@ -48,23 +56,15 @@ pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 }
 
 pub fn run(command: &PlanCommand) {
-    service_command::run_service_command(
-        &command.request,
-        command.timeout,
-        ServiceRunSpec {
-            intro: format!(
-                "Plan Codex en cours depuis {} (timeout: {} secondes)...",
-                command.audit_path.display(),
-                command.timeout.as_secs()
-            ),
-            command_name: "plan",
-            saved_label: "plan",
-            final_label: "plan",
-            missing_message_label: "plan",
-            output_dir: &command.output_dir,
-            save: save_plan,
-            clean_detector: None,
-        },
+    service_command::execute_service_command(
+        &command.service,
+        PLAN_DESCRIPTOR,
+        format!(
+            "Plan Codex en cours depuis {} (timeout: {} secondes)...",
+            command.audit_path.display(),
+            command.service.timeout.as_secs()
+        ),
+        save_plan,
     );
 }
 
@@ -107,15 +107,16 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         )
     })?, &context)
     .map_err(ParseOutcome::Error)?;
-    let output_dir = service_command::resolve_output_dir(&common, &context, ".plan");
-    let prompt = build_prompt(&workspace_root, &audit_path, &output_dir);
+    let preview_output_dir =
+        service_command::resolve_output_dir(&common, &context, PLAN_DESCRIPTOR.default_output_dir);
+    let prompt = build_prompt(&workspace_root, &audit_path, &preview_output_dir);
+    let service =
+        service_command::prepare_service_command(&common, &context, PLAN_DESCRIPTOR, prompt);
 
     Ok(PlanCommand {
-        request: common.build_request(prompt),
+        service,
         workspace_root,
         audit_path,
-        output_dir,
-        timeout: common.timeout,
     })
 }
 

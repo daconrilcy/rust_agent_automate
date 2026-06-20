@@ -4,19 +4,27 @@ use std::time::Duration;
 
 use crate::artifact;
 use crate::cli::{ParseOutcome, next_value};
-use crate::codex::CodexRequest;
 use crate::review::{self, ReviewSubject};
-use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
+use crate::service_command::{
+    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FixLoopCommand {
-    pub request: CodexRequest,
+    pub service: PreparedServiceCommand,
     pub workspace_root: PathBuf,
     pub input_kind: ReviewSubject,
     pub artifact_path: PathBuf,
-    pub output_dir: PathBuf,
-    pub timeout: Duration,
 }
+
+const FIX_LOOP_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCommandDescriptor {
+    default_output_dir: ".fix-loop",
+    command_name: "fix-loop",
+    saved_label: "rapport fix-loop",
+    final_label: "rapport fix-loop",
+    missing_message_label: "rapport fix-loop",
+    clean_detector: None,
+};
 
 pub fn resolve_artifact_path(
     kind: ReviewSubject,
@@ -57,24 +65,16 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 }
 
 pub fn run(command: &FixLoopCommand) {
-    service_command::run_service_command(
-        &command.request,
-        command.timeout,
-        ServiceRunSpec {
-            intro: format!(
-                "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
-                command.input_kind,
-                command.artifact_path.display(),
-                command.timeout.as_secs()
-            ),
-            command_name: "fix-loop",
-            saved_label: "rapport fix-loop",
-            final_label: "rapport fix-loop",
-            missing_message_label: "rapport fix-loop",
-            output_dir: &command.output_dir,
-            save: save_report,
-            clean_detector: None,
-        },
+    service_command::execute_service_command(
+        &command.service,
+        FIX_LOOP_DESCRIPTOR,
+        format!(
+            "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
+            command.input_kind,
+            command.artifact_path.display(),
+            command.service.timeout.as_secs()
+        ),
+        save_report,
     );
 }
 
@@ -137,16 +137,25 @@ pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
     let workspace_root = context.workspace_root().to_path_buf();
     let artifact_path =
         resolve_artifact_path(input_kind, artifact_path, &context).map_err(ParseOutcome::Error)?;
-    let output_dir = service_command::resolve_output_dir(&common, &context, ".fix-loop");
-    let prompt = build_prompt(&workspace_root, input_kind, &artifact_path, &output_dir);
+    let preview_output_dir = service_command::resolve_output_dir(
+        &common,
+        &context,
+        FIX_LOOP_DESCRIPTOR.default_output_dir,
+    );
+    let prompt = build_prompt(
+        &workspace_root,
+        input_kind,
+        &artifact_path,
+        &preview_output_dir,
+    );
+    let service =
+        service_command::prepare_service_command(&common, &context, FIX_LOOP_DESCRIPTOR, prompt);
 
     Ok(FixLoopCommand {
-        request: common.build_request(prompt),
+        service,
         workspace_root,
         input_kind,
         artifact_path,
-        output_dir,
-        timeout: common.timeout,
     })
 }
 

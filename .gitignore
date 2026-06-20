@@ -8,3 +8,5 @@
 .audit_tmp_target/
 .target-verify/
 target-audit-verify/
+.target-verify-loop/
+.target*/

@@ -541,14 +541,29 @@ fn path_lookup_candidates(candidate: &Path, pathext_env: Option<&std::ffi::OsStr
     }
 
     let mut extensions = pathext_extensions(pathext_env);
-    let mut candidates = Vec::with_capacity(1 + extensions.len());
+    let mut candidates = Vec::with_capacity(extensionless_candidate_capacity(extensions.len()));
+
+    #[cfg(not(windows))]
     candidates.push(candidate.to_path_buf());
+
     candidates.extend(
         extensions
             .drain(..)
             .map(|ext| candidate.with_extension(ext)),
     );
     candidates
+}
+
+fn extensionless_candidate_capacity(extension_count: usize) -> usize {
+    #[cfg(windows)]
+    {
+        extension_count
+    }
+
+    #[cfg(not(windows))]
+    {
+        1 + extension_count
+    }
 }
 
 fn pathext_extensions(pathext_env: Option<&std::ffi::OsStr>) -> Vec<String> {
@@ -885,6 +900,39 @@ mod tests {
         let executable = bin_dir.join("codex.cmd");
         fs::create_dir_all(&bin_dir).expect("creation du dossier PATH");
         fs::write(&executable, "fake codex").expect("creation du faux codex");
+
+        let path_env = std::env::join_paths([bin_dir.clone()]).expect("PATH de test");
+        let resolved = resolve_codex_candidate(
+            Path::new("codex"),
+            Some(path_env.as_os_str()),
+            Some(std::ffi::OsStr::new(".CMD;.EXE")),
+        )
+        .expect("le PATH doit etre pris en compte");
+
+        assert_eq!(
+            resolved.to_string_lossy().to_ascii_lowercase(),
+            executable.to_string_lossy().to_ascii_lowercase()
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_codex_candidate_ignores_extensionless_windows_path_entry() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rust_agent_codex_windows_path_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        let bin_dir = temp_dir.join("bin");
+        let extensionless = bin_dir.join("codex");
+        let executable = bin_dir.join("codex.cmd");
+        fs::create_dir_all(&bin_dir).expect("creation du dossier PATH");
+        fs::write(&extensionless, "not a win32 executable").expect("creation du faux codex");
+        fs::write(&executable, "fake codex").expect("creation du faux codex cmd");
 
         let path_env = std::env::join_paths([bin_dir.clone()]).expect("PATH de test");
         let resolved = resolve_codex_candidate(

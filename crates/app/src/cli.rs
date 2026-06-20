@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::audit::AuditCommand;
-use crate::automate::{self, AutomateCommand, RefactorAutomateCommand};
+use crate::automate::{AutomateCommand, RefactorAutomateCommand};
 use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use crate::command_registry;
 use crate::fix_loop::FixLoopCommand;
@@ -27,26 +27,39 @@ pub enum ParseOutcome {
     Error(String),
 }
 
+impl CliCommand {
+    pub fn execute(self) -> i32 {
+        match self {
+            Self::Run(request) => run_request(&request),
+            Self::Audit(command) => {
+                run_service_command(crate::run_audit(&command));
+                0
+            }
+            Self::Plan(command) => {
+                run_service_command(crate::run_plan(&command));
+                0
+            }
+            Self::ImplementationAudit(command) => {
+                run_service_command(crate::run_implementation_audit(&command));
+                0
+            }
+            Self::Review(command) => {
+                run_service_command(crate::run_review(&command));
+                0
+            }
+            Self::FixLoop(command) => {
+                run_service_command(crate::run_fix_loop(&command));
+                0
+            }
+            Self::Automate(command) => run_automate(&command),
+            Self::RefactorAutomate(command) => run_refactor_automate(&command),
+        }
+    }
+}
+
 pub fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
-    match command_registry::canonical_name(args.first().map(String::as_str)) {
-        Some("audit") => return crate::audit::parse_args(&args[1..]).map(CliCommand::Audit),
-        Some("plan") => return crate::plan::parse_args(&args[1..]).map(CliCommand::Plan),
-        Some("implementation-audit") => {
-            return crate::implementation_audit::parse_args(&args[1..])
-                .map(CliCommand::ImplementationAudit);
-        }
-        Some("review") => return crate::review::parse_args(&args[1..]).map(CliCommand::Review),
-        Some("fix-loop") => {
-            return crate::fix_loop::parse_args(&args[1..]).map(CliCommand::FixLoop);
-        }
-        Some("automate") => {
-            return automate::parse_automate_args(&args[1..]).map(CliCommand::Automate);
-        }
-        Some("refactor-automate") => {
-            return automate::parse_refactor_automate_args(&args[1..])
-                .map(CliCommand::RefactorAutomate);
-        }
-        Some(_) | None => {}
+    if let Some(result) = command_registry::parse_registered_subcommand(args) {
+        return result;
     }
 
     parse_run_args(args).map(CliCommand::Run)
@@ -162,4 +175,160 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
         CodexRequest::new(model, reasoning_effort, mode, prompt, verbose)
             .with_resume_last(resume_last),
     )
+}
+
+fn run_service_command(
+    result: Result<crate::reporting::CompletedReport, crate::reporting::ReportFailure>,
+) {
+    if let Err(error) = result {
+        let code = service_command_exit_code(&error);
+        std::process::exit(code);
+    }
+}
+
+fn service_command_exit_code(error: &crate::reporting::ReportFailure) -> i32 {
+    match error {
+        crate::reporting::ReportFailure::MissingFinalMessage { status_code, .. } => {
+            crate::codex::process_exit_code(Some(*status_code))
+        }
+        _ => 1,
+    }
+}
+
+fn run_request(request: &CodexRequest) -> i32 {
+    match crate::codex::run(request) {
+        Ok(result) => {
+            if result.status.success() {
+                if let Some(message) = result.final_message {
+                    println!("{message}");
+                }
+                0
+            } else {
+                let stderr = result.stderr.trim();
+                let stdout = result.stdout.trim();
+                if !stderr.is_empty() {
+                    eprintln!("{stderr}");
+                } else if !stdout.is_empty() {
+                    eprintln!("{stdout}");
+                }
+                crate::codex::process_exit_code(result.status.code())
+            }
+        }
+        Err(error) => {
+            eprintln!("echec lors de l'appel a codex: {error}");
+            1
+        }
+    }
+}
+
+fn run_automate(command: &AutomateCommand) -> i32 {
+    eprintln!(
+        "Automate Codex depuis {} sur {}...",
+        command.workflow_path.display(),
+        command.workspace_root.display()
+    );
+    run_automate_workflow(
+        &command.workflow,
+        &command.initial_prompt,
+        &command.workspace_root,
+        &command.workspace_root,
+    )
+}
+
+fn run_refactor_automate(command: &RefactorAutomateCommand) -> i32 {
+    eprintln!(
+        "Automate de refactoring depuis {} sur {}...",
+        command.launch_workspace_root.display(),
+        command.target_dir.display()
+    );
+    run_automate_workflow(
+        &command.workflow,
+        &command.initial_prompt,
+        &command.output_root,
+        &command.target_dir,
+    )
+}
+
+fn run_automate_workflow(
+    workflow: &crate::automate::Workflow,
+    initial_prompt: &str,
+    workspace_root: &std::path::Path,
+    target_dir: &std::path::Path,
+) -> i32 {
+    match crate::automate::run_workflow(workflow, initial_prompt, workspace_root, target_dir) {
+        Ok(report) => {
+            println!(
+                "Automate termine apres {} cycle(s){}.",
+                report.completed_cycles,
+                if report.clean_stop {
+                    " (audit d'alignement sans correction actionnable detectee)"
+                } else {
+                    ""
+                }
+            );
+
+            for result in report.step_results {
+                let artifact = result
+                    .artifact_path
+                    .as_ref()
+                    .map(|path| format!(" -> {}", path.display()))
+                    .unwrap_or_default();
+                println!(
+                    "- cycle {} / {}: statut {:?}{}",
+                    result.cycle, result.name, result.status_code, artifact
+                );
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("echec de l'automate: {error}");
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service_command_exit_code;
+    use crate::reporting::ReportFailure;
+
+    #[test]
+    fn missing_final_message_uses_codex_status_code_mapping() {
+        let code = service_command_exit_code(&ReportFailure::MissingFinalMessage {
+            status_code: 7,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        assert_eq!(code, 7);
+    }
+
+    #[test]
+    fn missing_final_message_without_status_uses_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::MissingFinalMessage {
+            status_code: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn codex_call_failures_exit_with_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::CodexCall("boom".to_string()));
+
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn save_failures_exit_with_generic_failure_code() {
+        let code = service_command_exit_code(&ReportFailure::Save {
+            message: "rapport".to_string(),
+            clean: Some(false),
+            error: "disk full".to_string(),
+        });
+
+        assert_eq!(code, 1);
+    }
 }

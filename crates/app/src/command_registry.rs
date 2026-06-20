@@ -1,10 +1,13 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::cli::{CliCommand, ParseOutcome};
+
+#[derive(Debug, Clone, Copy)]
 pub struct CommandSpec {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub accepts_codex_options: bool,
     pub usage: &'static [&'static str],
     pub examples: &'static [&'static str],
+    pub parser: Option<fn(&[String]) -> Result<CliCommand, ParseOutcome>>,
 }
 
 pub const COMMANDS: &[CommandSpec] = &[
@@ -21,6 +24,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- audit --output-dir .audit",
             "cargo run -q -p app -- audit --timeout-seconds 120",
         ],
+        parser: Some(|args| crate::audit::parse_args(args).map(CliCommand::Audit)),
     },
     CommandSpec {
         name: "plan",
@@ -33,6 +37,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- plan .audit\\audit-1781887189.md",
             "cargo run -q -p app -- plan --audit .audit\\audit-1781887189.md --output-dir .plan",
         ],
+        parser: Some(|args| crate::plan::parse_args(args).map(CliCommand::Plan)),
     },
     CommandSpec {
         name: "implementation-audit",
@@ -46,6 +51,9 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md",
             "cargo run -q -p app -- implementation-audit --plan .plan\\plan-1781894465.md --implementation crates\\app",
         ],
+        parser: Some(|args| {
+            crate::implementation_audit::parse_args(args).map(CliCommand::ImplementationAudit)
+        }),
     },
     CommandSpec {
         name: "review",
@@ -59,6 +67,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- review --type audit --artifact .audit\\audit-1781887189.md",
             "cargo run -q -p app -- review implementation crates\\app",
         ],
+        parser: Some(|args| crate::review::parse_args(args).map(CliCommand::Review)),
     },
     CommandSpec {
         name: "fix-loop",
@@ -74,6 +83,7 @@ pub const COMMANDS: &[CommandSpec] = &[
             "cargo run -q -p app -- fix-loop implementation crates\\app",
             "cargo run -q -p app -- loop implementation crates\\app",
         ],
+        parser: Some(|args| crate::fix_loop::parse_args(args).map(CliCommand::FixLoop)),
     },
     CommandSpec {
         name: "automate",
@@ -81,6 +91,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         accepts_codex_options: false,
         usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
         examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
+        parser: Some(|args| crate::automate::parse_automate_args(args).map(CliCommand::Automate)),
     },
     CommandSpec {
         name: "refactor-automate",
@@ -92,6 +103,9 @@ pub const COMMANDS: &[CommandSpec] = &[
         examples: &[
             "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",
         ],
+        parser: Some(|args| {
+            crate::automate::parse_refactor_automate_args(args).map(CliCommand::RefactorAutomate)
+        }),
     },
 ];
 
@@ -131,6 +145,16 @@ pub fn example_lines() -> impl Iterator<Item = &'static str> {
         .flat_map(|spec| spec.examples.iter().copied())
 }
 
+pub fn parse_registered_subcommand(args: &[String]) -> Option<Result<CliCommand, ParseOutcome>> {
+    let command = canonical_name(args.first().map(String::as_str))?;
+
+    COMMANDS
+        .iter()
+        .find(|spec| spec.name == command)
+        .and_then(|spec| spec.parser)
+        .map(|parser| parser(&args[1..]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +184,16 @@ mod tests {
         );
         assert_eq!(canonical_name(Some("unknown")), None);
         assert_eq!(canonical_name(None), None);
+    }
+
+    #[test]
+    fn registered_commands_expose_parsers() {
+        for spec in COMMANDS {
+            assert!(
+                spec.parser.is_some(),
+                "parser missing for registered command {}",
+                spec.name
+            );
+        }
     }
 }

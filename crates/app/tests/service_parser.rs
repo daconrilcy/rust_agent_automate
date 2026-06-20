@@ -41,6 +41,19 @@ fn request_for(command: &CliCommand) -> &CodexRequest {
     }
 }
 
+fn command_kind(command: &CliCommand) -> &'static str {
+    match command {
+        CliCommand::Run(_) => "run",
+        CliCommand::Audit(_) => "audit",
+        CliCommand::Plan(_) => "plan",
+        CliCommand::ImplementationAudit(_) => "implementation-audit",
+        CliCommand::Review(_) => "review",
+        CliCommand::FixLoop(_) => "fix-loop",
+        CliCommand::Automate(_) => "automate",
+        CliCommand::RefactorAutomate(_) => "refactor-automate",
+    }
+}
+
 #[test]
 fn shared_parser_handles_named_and_positional_inputs() {
     let args = [
@@ -208,6 +221,59 @@ fn registered_aliases_resolve_to_expected_command_variants() {
 
     let loop_alias = parse(&["loop", "implementation", "."]).expect("alias loop");
     assert!(matches!(loop_alias, CliCommand::FixLoop(_)));
+}
+
+#[test]
+fn every_registered_subcommand_parses_to_its_expected_variant() {
+    let workflow_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("workflows")
+        .join("refactor.json");
+    let workflow_path = workflow_path.to_string_lossy().into_owned();
+    let cases = [
+        ("audit", vec!["audit".to_string()]),
+        ("plan", vec!["plan".to_string(), "Cargo.toml".to_string()]),
+        (
+            "implementation-audit",
+            vec!["implementation-audit".to_string(), "Cargo.toml".to_string()],
+        ),
+        (
+            "review",
+            vec![
+                "review".to_string(),
+                "implementation".to_string(),
+                ".".to_string(),
+            ],
+        ),
+        (
+            "fix-loop",
+            vec![
+                "fix-loop".to_string(),
+                "implementation".to_string(),
+                ".".to_string(),
+            ],
+        ),
+        (
+            "automate",
+            vec!["automate".to_string(), workflow_path.clone()],
+        ),
+        (
+            "refactor-automate",
+            vec![
+                "refactor-automate".to_string(),
+                "--target".to_string(),
+                ".".to_string(),
+                "Durcir".to_string(),
+            ],
+        ),
+    ];
+
+    for (expected, args) in cases {
+        let command = parse(&args.iter().map(String::as_str).collect::<Vec<_>>())
+            .expect("commande enregistree");
+        assert_eq!(command_kind(&command), expected);
+    }
 }
 
 #[test]

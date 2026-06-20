@@ -1,11 +1,11 @@
-mod common;
+mod support;
 
 use std::fs;
 
 #[test]
 fn workflow_chain_persists_and_reuses_artifacts() {
-    let workspace = common::temp_dir("workflow_chain");
-    let codex_bin = common::create_fake_codex_bin(&workspace);
+    let workspace = support::temp_dir("workflow_chain");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
     let log_path = workspace.join("codex.log");
     let workflow_path = workspace.join("workflow.json");
     let target_dir = workspace.join("target");
@@ -32,14 +32,14 @@ fn workflow_chain_persists_and_reuses_artifacts() {
     }"#;
     fs::write(&workflow_path, workflow).expect("ecriture du workflow");
 
-    let mut command = common::build_command();
+    let mut command = support::build_command();
     command
         .current_dir(&workspace)
         .env_remove("RUST_AGENT_WORKSPACE_ROOT")
         .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
         .env(
             "PATH",
-            common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
         )
         .env("USERPROFILE", &workspace)
         .env("FAKE_CODEX_LOG", &log_path)
@@ -73,9 +73,9 @@ fn workflow_chain_persists_and_reuses_artifacts() {
 
 #[test]
 fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
-    let runner_dir = common::temp_dir("workflow_runner");
-    let workspace = common::temp_dir("workflow_target");
-    let codex_bin = common::create_fake_codex_bin(&workspace);
+    let runner_dir = support::temp_dir("workflow_runner");
+    let workspace = support::temp_dir("workflow_target");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
     let log_path = workspace.join("codex.log");
     let workflow_path = runner_dir.join("workflow.json");
     fs::create_dir_all(&runner_dir).expect("creation du dossier runner");
@@ -103,14 +103,14 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     }"#;
     fs::write(&workflow_path, workflow).expect("ecriture du workflow");
 
-    let mut command = common::build_command();
+    let mut command = support::build_command();
     command
         .current_dir(&runner_dir)
         .env_remove("RUST_AGENT_WORKSPACE_ROOT")
         .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
         .env(
             "PATH",
-            common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
         )
         .env("USERPROFILE", &workspace)
         .env("FAKE_CODEX_LOG", &log_path)

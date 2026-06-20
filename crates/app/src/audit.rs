@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
+use crate::cli::{ParseOutcome, next_value};
 use crate::codex::CodexRequest;
 use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuditCommand {
@@ -41,9 +41,17 @@ pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path)
     )
 }
 
-pub fn resolve_target_dir(path: PathBuf, context: &service_paths::ExecutionContext) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, &context)
-        .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
+pub fn resolve_target_dir(
+    path: PathBuf,
+    context: &service_paths::ExecutionContext,
+) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(
+        path,
+        "dossier cible",
+        PathRequirement::Directory,
+        &context,
+    )
+    .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
 }
 
 pub fn run(command: &AuditCommand) {
@@ -75,34 +83,27 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut target_dir: Option<PathBuf> = None;
 
-    let mut index = 0;
-    while index < args.len() {
-        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
-            index += consumed;
-            continue;
+    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
+        "--target" => {
+            let value = next_value(args, index, "--target")?;
+            target_dir = Some(PathBuf::from(value));
+            Ok(2)
         }
-
-        match args[index].as_str() {
-            "--target" => {
-                let value = next_value(args, index, "--target")?;
-                target_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                return Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour audit: {value}"
-                )));
-            }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
         }
-    }
+        value => Err(ParseOutcome::Error(format!(
+            "argument inattendu pour audit: {value}"
+        ))),
+    })?;
 
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     let workspace_root = context.workspace_root().to_path_buf();
-    let target_dir = resolve_target_dir(target_dir.unwrap_or_else(|| workspace_root.clone()), &context)
-        .map_err(ParseOutcome::Error)?;
+    let target_dir = resolve_target_dir(
+        target_dir.unwrap_or_else(|| workspace_root.clone()),
+        &context,
+    )
+    .map_err(ParseOutcome::Error)?;
     let output_dir = service_command::resolve_output_dir(&common, &context, ".audit");
     let prompt = build_prompt(&workspace_root, &target_dir, &output_dir);
 

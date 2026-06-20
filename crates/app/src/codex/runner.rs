@@ -28,7 +28,11 @@ pub fn build_command(
     command
 }
 
-pub fn run_exec(mut command: Command, verbose: bool, use_color_never: bool) -> io::Result<RunResult> {
+pub fn run_exec(
+    mut command: Command,
+    verbose: bool,
+    use_color_never: bool,
+) -> io::Result<RunResult> {
     let output_file = temp_output_file_path();
 
     append_exec_capture_args(&mut command, &output_file, use_color_never);
@@ -131,7 +135,10 @@ pub fn run_exec_until_final_message(
     }
 }
 
-pub(crate) fn base_command_args(request: &CodexRequest, inside_git_repository: bool) -> Vec<String> {
+pub(crate) fn base_command_args(
+    request: &CodexRequest,
+    inside_git_repository: bool,
+) -> Vec<String> {
     let mut args = Vec::new();
 
     if request.mode == CodexMode::Exec {
@@ -162,7 +169,11 @@ pub(crate) fn base_command_args(request: &CodexRequest, inside_git_repository: b
     args
 }
 
-pub(crate) fn append_exec_capture_args(command: &mut Command, output_file: &Path, use_color_never: bool) {
+pub(crate) fn append_exec_capture_args(
+    command: &mut Command,
+    output_file: &Path,
+    use_color_never: bool,
+) {
     command.arg("--output-last-message").arg(output_file);
 
     if use_color_never {

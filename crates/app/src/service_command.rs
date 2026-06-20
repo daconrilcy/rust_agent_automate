@@ -2,10 +2,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use crate::cli::{ParseOutcome, next_value, parse_timeout};
+use crate::codex::{
+    CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+};
 use crate::reporting::{self, ReportSpec};
 use crate::service_paths::{self, ExecutionContext};
-use crate::{ParseOutcome, next_value, parse_timeout};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceCommandOptions {
@@ -87,6 +89,34 @@ pub fn parse_common_option(
         }
         _ => Ok(None),
     }
+}
+
+pub fn parse_with_common_options<F>(
+    args: &[String],
+    options: &mut ServiceCommandOptions,
+    mut argument_handler: F,
+) -> Result<(), ParseOutcome>
+where
+    F: FnMut(usize, &str) -> Result<usize, ParseOutcome>,
+{
+    let mut index = 0;
+    while index < args.len() {
+        if let Some(consumed) = parse_common_option(args, index, options)? {
+            index += consumed;
+            continue;
+        }
+
+        let consumed = argument_handler(index, args[index].as_str())?;
+        if consumed == 0 {
+            return Err(ParseOutcome::Error(format!(
+                "le parseur partage doit consommer au moins un argument: {}",
+                args[index]
+            )));
+        }
+        index += consumed;
+    }
+
+    Ok(())
 }
 
 pub fn resolve_context() -> Result<ExecutionContext, String> {
@@ -175,5 +205,25 @@ mod tests {
         assert_eq!(request.prompt.as_deref(), Some("Prompt"));
         assert!(request.verbose);
         assert!(request.resume_last);
+    }
+
+    #[test]
+    fn parse_with_common_options_collects_positionals() {
+        let args = ["audit.md", "--verbose"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut options = ServiceCommandOptions::new(Duration::from_secs(900));
+        parse_with_common_options(&args, &mut options, |index, value| {
+            if index == 0 && value == "audit.md" {
+                Ok(1)
+            } else if value == "--verbose" {
+                Ok(1)
+            } else {
+                Err(ParseOutcome::Error(format!("unexpected: {value}")))
+            }
+        })
+        .expect("valid parse");
+        assert!(options.verbose);
     }
 }

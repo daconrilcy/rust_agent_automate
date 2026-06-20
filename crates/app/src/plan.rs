@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
+use crate::cli::{ParseOutcome, next_value};
 use crate::codex::CodexRequest;
 use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlanCommand {
@@ -72,38 +72,31 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut audit_path: Option<PathBuf> = None;
 
-    let mut index = 0;
-    while index < args.len() {
-        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
-            index += consumed;
-            continue;
+    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
+        "--audit" => {
+            let value = next_value(args, index, "--audit")?;
+            if audit_path.is_some() {
+                return Err(ParseOutcome::Error(
+                    "l'audit a deja ete fourni pour la commande plan".to_string(),
+                ));
+            }
+            audit_path = Some(PathBuf::from(value));
+            Ok(2)
         }
-
-        match args[index].as_str() {
-            "--audit" => {
-                let value = next_value(args, index, "--audit")?;
-                if audit_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "l'audit a deja ete fourni pour la commande plan".to_string(),
-                    ));
-                }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if audit_path.is_some() {
+                Err(ParseOutcome::Error(format!(
+                    "argument inattendu pour plan: {value}"
+                )))
+            } else {
                 audit_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if audit_path.is_some() {
-                    return Err(ParseOutcome::Error(format!(
-                        "argument inattendu pour plan: {value}"
-                    )));
-                }
-                audit_path = Some(PathBuf::from(value));
-                index += 1;
+                Ok(1)
             }
         }
-    }
+    })?;
 
     let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
     let workspace_root = context.workspace_root().to_path_buf();

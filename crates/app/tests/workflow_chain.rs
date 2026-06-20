@@ -138,7 +138,10 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
         .expect("lecture du dossier .plan")
         .count();
 
-    assert!(audit_reports >= 1, "un rapport d'audit doit etre genere dans la cible");
+    assert!(
+        audit_reports >= 1,
+        "un rapport d'audit doit etre genere dans la cible"
+    );
     assert!(plan_reports >= 1, "un plan doit etre genere dans la cible");
     assert!(
         !runner_dir.join(".audit").exists(),

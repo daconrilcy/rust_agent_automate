@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
+use crate::cli::{ParseOutcome, next_value};
 use crate::codex::CodexRequest;
 use crate::reporting;
 use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ImplementationAuditCommand {
@@ -23,14 +23,24 @@ pub fn resolve_plan_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "plan d'implementation", PathRequirement::File, &context)
+    service_paths::resolve_existing_path(
+        path,
+        "plan d'implementation",
+        PathRequirement::File,
+        &context,
+    )
 }
 
 pub fn resolve_implementation_path(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
 ) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "implementation", PathRequirement::FileOrDirectory, &context)
+    service_paths::resolve_existing_path(
+        path,
+        "implementation",
+        PathRequirement::FileOrDirectory,
+        &context,
+    )
 }
 
 pub fn build_prompt(
@@ -106,48 +116,41 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
     let mut plan_path: Option<PathBuf> = None;
     let mut implementation_path: Option<PathBuf> = None;
 
-    let mut index = 0;
-    while index < args.len() {
-        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
-            index += consumed;
-            continue;
+    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
+        "--plan" => {
+            let value = next_value(args, index, "--plan")?;
+            if plan_path.is_some() {
+                return Err(ParseOutcome::Error(
+                    "le plan d'implementation a deja ete fourni".to_string(),
+                ));
+            }
+            plan_path = Some(PathBuf::from(value));
+            Ok(2)
         }
-
-        match args[index].as_str() {
-            "--plan" => {
-                let value = next_value(args, index, "--plan")?;
-                if plan_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le plan d'implementation a deja ete fourni".to_string(),
-                    ));
-                }
+        "--implementation" => {
+            let value = next_value(args, index, "--implementation")?;
+            if implementation_path.is_some() {
+                return Err(ParseOutcome::Error(
+                    "le chemin d'implementation a deja ete fourni".to_string(),
+                ));
+            }
+            implementation_path = Some(PathBuf::from(value));
+            Ok(2)
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if plan_path.is_some() {
+                Err(ParseOutcome::Error(format!(
+                    "argument inattendu pour implementation-audit: {value}"
+                )))
+            } else {
                 plan_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--implementation" => {
-                let value = next_value(args, index, "--implementation")?;
-                if implementation_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le chemin d'implementation a deja ete fourni".to_string(),
-                    ));
-                }
-                implementation_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if plan_path.is_some() {
-                    return Err(ParseOutcome::Error(format!(
-                        "argument inattendu pour implementation-audit: {value}"
-                    )));
-                }
-                plan_path = Some(PathBuf::from(value));
-                index += 1;
+                Ok(1)
             }
         }
-    }
+    })?;
 
     let plan_path = plan_path.ok_or_else(|| {
         ParseOutcome::Error(

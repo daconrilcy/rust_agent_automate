@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const WORKSPACE_ROOT_ENV: &str = "RUST_AGENT_WORKSPACE_ROOT";
+pub const WORKSPACE_ROOT_OVERRIDE_ENV: &str = "RUST_AGENT_USE_WORKSPACE_ROOT";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathRequirement {
@@ -13,7 +14,6 @@ pub enum PathRequirement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
     workspace_root: PathBuf,
-    target_root: Option<PathBuf>,
     output_root: PathBuf,
 }
 
@@ -22,8 +22,12 @@ impl ExecutionContext {
         Self {
             output_root: workspace_root.clone(),
             workspace_root,
-            target_root: None,
         }
+    }
+
+    pub fn with_output_root(mut self, output_root: PathBuf) -> Self {
+        self.output_root = output_root;
+        self
     }
 
     pub fn workspace_root(&self) -> &Path {
@@ -41,7 +45,11 @@ pub fn resolve_existing_path(
     requirement: PathRequirement,
     context: &ExecutionContext,
 ) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() { path } else { context.workspace_root().join(path) };
+    let path = if path.is_absolute() {
+        path
+    } else {
+        context.workspace_root().join(path)
+    };
 
     let metadata = fs::metadata(&path).map_err(|error| {
         format!(
@@ -81,10 +89,13 @@ pub fn resolve_existing_path(
 }
 
 pub fn current_workspace_root() -> Result<PathBuf, String> {
-    match std::env::var_os(WORKSPACE_ROOT_ENV) {
-        Some(path) => canonicalize_workspace_root(PathBuf::from(path)),
-        None => std::env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}")),
+    if std::env::var_os(WORKSPACE_ROOT_OVERRIDE_ENV).is_some() {
+        match std::env::var_os(WORKSPACE_ROOT_ENV) {
+            Some(path) => canonicalize_workspace_root(PathBuf::from(path)),
+            None => read_current_dir(),
+        }
+    } else {
+        read_current_dir()
     }
 }
 
@@ -92,7 +103,11 @@ pub fn current_execution_context() -> Result<ExecutionContext, String> {
     current_workspace_root().map(ExecutionContext::from_workspace_root)
 }
 
-pub fn resolve_output_dir(output_dir: Option<PathBuf>, context: &ExecutionContext, default_dir_name: &str) -> PathBuf {
+pub fn resolve_output_dir(
+    output_dir: Option<PathBuf>,
+    context: &ExecutionContext,
+    default_dir_name: &str,
+) -> PathBuf {
     output_dir.unwrap_or_else(|| context.output_root().join(default_dir_name))
 }
 
@@ -103,6 +118,11 @@ fn canonicalize_workspace_root(path: PathBuf) -> Result<PathBuf, String> {
             path.display()
         )
     })
+}
+
+fn read_current_dir() -> Result<PathBuf, String> {
+    std::env::current_dir()
+        .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))
 }
 
 #[cfg(test)]
@@ -173,8 +193,7 @@ mod tests {
 
     #[test]
     fn resolve_output_dir_uses_default_dir_name() {
-        let context =
-            ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
+        let context = ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
         let output_dir = resolve_output_dir(None, &context, ".audit");
 
         assert_eq!(output_dir, context.workspace_root().join(".audit"));
@@ -182,12 +201,22 @@ mod tests {
 
     #[test]
     fn resolve_output_dir_keeps_explicit_value() {
-        let context =
-            ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
+        let context = ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
         let explicit = PathBuf::from("C:\\tmp\\custom");
         let output_dir = resolve_output_dir(Some(explicit.clone()), &context, ".audit");
 
         assert_eq!(output_dir, explicit);
+    }
+
+    #[test]
+    fn execution_context_can_track_target_and_output_roots() {
+        let context = ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"))
+            .with_output_root(PathBuf::from("C:\\dev\\rust_agent\\crates\\app"));
+
+        assert_eq!(
+            context.output_root(),
+            Path::new("C:\\dev\\rust_agent\\crates\\app")
+        );
     }
 
     #[test]
@@ -203,6 +232,9 @@ mod tests {
         )
         .expect("le fichier relatif doit etre resolu depuis le workspace explicite");
 
-        assert_eq!(path, fs::canonicalize(workspace_root.join("Cargo.toml")).expect("canonical path"));
+        assert_eq!(
+            path,
+            fs::canonicalize(workspace_root.join("Cargo.toml")).expect("canonical path")
+        );
     }
 }

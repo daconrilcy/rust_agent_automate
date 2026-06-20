@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
+use crate::cli::{ParseOutcome, next_value};
 use crate::codex::CodexRequest;
 use crate::review::{self, ReviewSubject};
 use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
-use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FixLoopCommand {
@@ -83,54 +83,44 @@ pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
     let mut input_kind: Option<ReviewSubject> = None;
     let mut artifact_path: Option<PathBuf> = None;
 
-    let mut index = 0;
-    while index < args.len() {
-        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
-            index += consumed;
-            continue;
+    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
+        "--type" => {
+            let value = next_value(args, index, "--type")?;
+            if input_kind.is_some() {
+                return Err(ParseOutcome::Error(
+                    "le type d'entree de fix-loop a deja ete fourni".to_string(),
+                ));
+            }
+            input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
+            Ok(2)
         }
-
-        match args[index].as_str() {
-            "--type" => {
-                let value = next_value(args, index, "--type")?;
-                if input_kind.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "le type d'entree de fix-loop a deja ete fourni".to_string(),
-                    ));
-                }
+        "--artifact" => {
+            let value = next_value(args, index, "--artifact")?;
+            if artifact_path.is_some() {
+                return Err(ParseOutcome::Error(
+                    "l'artefact de fix-loop a deja ete fourni".to_string(),
+                ));
+            }
+            artifact_path = Some(PathBuf::from(value));
+            Ok(2)
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if input_kind.is_none() {
                 input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
-                index += 2;
-            }
-            "--artifact" => {
-                let value = next_value(args, index, "--artifact")?;
-                if artifact_path.is_some() {
-                    return Err(ParseOutcome::Error(
-                        "l'artefact de fix-loop a deja ete fourni".to_string(),
-                    ));
-                }
+                Ok(1)
+            } else if artifact_path.is_none() {
                 artifact_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
-            }
-            value => {
-                if input_kind.is_none() {
-                    input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
-                    index += 1;
-                    continue;
-                }
-                if artifact_path.is_none() {
-                    artifact_path = Some(PathBuf::from(value));
-                    index += 1;
-                    continue;
-                }
-                return Err(ParseOutcome::Error(format!(
+                Ok(1)
+            } else {
+                Err(ParseOutcome::Error(format!(
                     "argument inattendu pour fix-loop: {value}"
-                )));
+                )))
             }
         }
-    }
+    })?;
 
     let input_kind = input_kind.ok_or_else(|| {
         ParseOutcome::Error(
@@ -195,8 +185,12 @@ mod tests {
         let context = crate::service_paths::ExecutionContext::from_workspace_root(
             std::env::current_dir().expect("cwd"),
         );
-        let path = resolve_artifact_path(ReviewSubject::Implementation, std::env::temp_dir(), &context)
-            .expect("implementation doit accepter un dossier");
+        let path = resolve_artifact_path(
+            ReviewSubject::Implementation,
+            std::env::temp_dir(),
+            &context,
+        )
+        .expect("implementation doit accepter un dossier");
 
         assert!(path.is_dir());
     }

@@ -11,7 +11,7 @@ use std::io;
 use std::time::Duration;
 
 pub use request::{
-    CodexMode, CodexRequest, ReasoningEffort, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
+    CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
 };
 pub use runner::RunResult;
 
@@ -51,9 +51,12 @@ pub fn run_until_final_message(request: &CodexRequest, timeout: Duration) -> io:
             io::ErrorKind::InvalidInput,
             "run_until_final_message requiert le mode exec",
         )),
-        CodexMode::Exec => {
-            runner::run_exec_until_final_message(command, request.verbose, timeout, !request.resume_last)
-        }
+        CodexMode::Exec => runner::run_exec_until_final_message(
+            command,
+            request.verbose,
+            timeout,
+            !request.resume_last,
+        ),
     }
 }
 

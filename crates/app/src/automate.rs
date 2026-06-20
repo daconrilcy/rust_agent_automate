@@ -23,10 +23,11 @@ pub struct AutomateCommand {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RefactorAutomateCommand {
-    pub workspace_root: PathBuf,
+    pub launch_workspace_root: PathBuf,
     pub workflow: Workflow,
     pub initial_prompt: String,
     pub target_dir: PathBuf,
+    pub output_root: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -147,7 +148,13 @@ pub fn run_workflow(
     workspace_root: &Path,
     target_dir: &Path,
 ) -> io::Result<AutomateReport> {
-    run_workflow_with_executor(workflow, initial_prompt, workspace_root, target_dir, run_step)
+    run_workflow_with_executor(
+        workflow,
+        initial_prompt,
+        workspace_root,
+        target_dir,
+        run_step,
+    )
 }
 
 fn run_workflow_with_executor<F>(
@@ -274,6 +281,7 @@ fn run_step(
     command
         .args(resolve_step_args(workflow, step, context))
         .env(service_paths::WORKSPACE_ROOT_ENV, &context.workspace_root)
+        .env(service_paths::WORKSPACE_ROOT_OVERRIDE_ENV, "1")
         .env(COMMAND_OUTCOME_PATH_ENV, &outcome_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

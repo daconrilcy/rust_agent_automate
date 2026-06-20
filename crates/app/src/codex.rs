@@ -462,10 +462,31 @@ fn resolve_codex_executable() -> io::Result<PathBuf> {
     let mut candidates = executable_candidates();
     candidates.dedup();
 
+    let path_env = std::env::var_os("PATH");
+    let pathext_env = std::env::var_os("PATHEXT");
+
     candidates
         .into_iter()
-        .find(|candidate| candidate.is_file())
+        .find_map(|candidate| {
+            resolve_codex_candidate(&candidate, path_env.as_deref(), pathext_env.as_deref())
+        })
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, codex_not_found_message()))
+}
+
+fn resolve_codex_candidate(
+    candidate: &Path,
+    path_env: Option<&std::ffi::OsStr>,
+    pathext_env: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    if candidate.is_file() {
+        return Some(candidate.to_path_buf());
+    }
+
+    if candidate_has_explicit_path(candidate) {
+        return None;
+    }
+
+    resolve_candidate_from_path(candidate, path_env, pathext_env)
 }
 
 fn executable_candidates() -> Vec<PathBuf> {
@@ -486,6 +507,56 @@ fn executable_candidates() -> Vec<PathBuf> {
     candidates.push(PathBuf::from("codex.cmd"));
 
     candidates
+}
+
+fn candidate_has_explicit_path(candidate: &Path) -> bool {
+    candidate.is_absolute() || candidate.components().count() > 1
+}
+
+fn resolve_candidate_from_path(
+    candidate: &Path,
+    path_env: Option<&std::ffi::OsStr>,
+    pathext_env: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let path_env = path_env?;
+    let path_dirs = std::env::split_paths(path_env).collect::<Vec<_>>();
+    let path_candidates = path_lookup_candidates(candidate, pathext_env);
+
+    path_dirs
+        .into_iter()
+        .flat_map(|dir| path_candidates.iter().map(move |entry| dir.join(entry)))
+        .find(|path| path.is_file())
+}
+
+fn path_lookup_candidates(candidate: &Path, pathext_env: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    if candidate.extension().is_some() {
+        return vec![candidate.to_path_buf()];
+    }
+
+    let mut extensions = pathext_extensions(pathext_env);
+    let mut candidates = Vec::with_capacity(1 + extensions.len());
+    candidates.push(candidate.to_path_buf());
+    candidates.extend(
+        extensions
+            .drain(..)
+            .map(|ext| candidate.with_extension(ext)),
+    );
+    candidates
+}
+
+fn pathext_extensions(pathext_env: Option<&std::ffi::OsStr>) -> Vec<String> {
+    let default = ".COM;.EXE;.BAT;.CMD";
+    let pathext = pathext_env
+        .map(|value| value.to_string_lossy().into_owned())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default.to_string());
+
+    pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_start_matches('.').to_string())
+        .collect()
 }
 
 fn configure_child_path(command: &mut Command) {
@@ -762,5 +833,58 @@ mod tests {
         assert_eq!(paths[1], PathBuf::from("C:\\Codex\\bin"));
         assert_eq!(paths[2], PathBuf::from("C:\\Windows"));
         assert_eq!(paths.len(), 3);
+    }
+
+    #[test]
+    fn resolve_codex_candidate_accepts_explicit_file_path() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rust_agent_codex_candidate_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        let executable = temp_dir.join("codex.exe");
+        fs::create_dir_all(&temp_dir).expect("creation du dossier temporaire");
+        fs::write(&executable, "fake codex").expect("creation du fichier exécutable");
+
+        let resolved = resolve_codex_candidate(&executable, None, None)
+            .expect("le chemin explicite doit etre accepte");
+
+        assert_eq!(resolved, executable);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn resolve_codex_candidate_finds_bare_name_on_path() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rust_agent_codex_path_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        let bin_dir = temp_dir.join("bin");
+        let executable = bin_dir.join("codex.cmd");
+        fs::create_dir_all(&bin_dir).expect("creation du dossier PATH");
+        fs::write(&executable, "fake codex").expect("creation du faux codex");
+
+        let path_env = std::env::join_paths([bin_dir.clone()]).expect("PATH de test");
+        let resolved = resolve_codex_candidate(
+            Path::new("codex"),
+            Some(path_env.as_os_str()),
+            Some(std::ffi::OsStr::new(".CMD;.EXE")),
+        )
+        .expect("le PATH doit etre pris en compte");
+
+        assert_eq!(
+            resolved
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            executable.to_string_lossy().to_ascii_lowercase()
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

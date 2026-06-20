@@ -6,6 +6,12 @@ use super::{
     PreparedParseContext, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
 };
 
+pub struct PreparedPromptedService<T> {
+    pub workspace_root: PathBuf,
+    pub service: PreparedServiceCommand,
+    pub resolved: T,
+}
+
 pub fn resolve_context() -> Result<ExecutionContext, String> {
     service_paths::current_execution_context()
 }
@@ -58,6 +64,27 @@ pub fn prepare_service_from_prompt(
     prepare_service_command(options, &parse_context.context, descriptor, prompt)
 }
 
+pub fn prepare_prompted_service<T, E, F>(
+    options: &ServiceCommandOptions,
+    descriptor: ServiceCommandDescriptor<'_>,
+    context: ExecutionContext,
+    build: F,
+) -> Result<PreparedPromptedService<T>, E>
+where
+    F: FnOnce(&PreparedParseContext) -> Result<(T, String), E>,
+{
+    let parse_context = prepare_parse_context_for_context(options, descriptor, context);
+    let workspace_root = parse_context.workspace_root.clone();
+    let (resolved, prompt) = build(&parse_context)?;
+    let service = prepare_service_from_prompt(options, &parse_context, descriptor, prompt);
+
+    Ok(PreparedPromptedService {
+        workspace_root,
+        service,
+        resolved,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +109,36 @@ mod tests {
         let command = prepare_service_command(&options, &context, descriptor, "Prompt".to_string());
 
         assert_eq!(command.request.working_dir, Some(PathBuf::from("C:\\repo")));
+    }
+
+    #[test]
+    fn prepare_prompted_service_reuses_parse_context_for_prompt_and_request() {
+        let options = ServiceCommandOptions::new(Duration::from_secs(900));
+        let context = ExecutionContext::from_workspace_root(PathBuf::from("C:\\repo"))
+            .with_output_root(PathBuf::from("C:\\repo\\out"));
+        let descriptor = ServiceCommandDescriptor {
+            default_output_dir: ".audit",
+            command_name: "audit",
+            artifact_stem: "audit",
+            saved_label: "audit",
+            final_label: "audit",
+            missing_message_label: "audit",
+            clean_detector: None,
+        };
+
+        let prepared = prepare_prompted_service(&options, descriptor, context, |parse_context| {
+            Ok::<_, ()>((
+                parse_context.output_dir.clone(),
+                format!("Prompt {}", parse_context.output_dir.display()),
+            ))
+        })
+        .expect("preparation du service");
+
+        assert_eq!(prepared.workspace_root, PathBuf::from("C:\\repo"));
+        assert_eq!(prepared.resolved, PathBuf::from("C:\\repo\\out\\.audit"));
+        assert_eq!(
+            prepared.service.request.prompt.as_deref(),
+            Some("Prompt C:\\repo\\out\\.audit")
+        );
     }
 }

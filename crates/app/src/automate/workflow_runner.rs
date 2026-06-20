@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::artifact_resolution::normalize_artifact_path;
 use super::loop_control::evaluate_clean_stop;
-use super::step_outcome::{AutomateReport, StepExecution, StepResult, run_step};
-use super::transport::{WorkflowStepOutcome, command_outcome_for_step};
+use super::step_outcome::{
+    AutomateReport, StepExecution, StepOutcome, StepResult, run_step,
+    validate_and_normalize_outcome,
+};
 use super::workflow_model::{Workflow, WorkflowStep};
 
 #[derive(Debug, Default)]
@@ -70,7 +71,8 @@ where
                 step.name
             );
             let output = run_step(workflow, step, &context)?;
-            let command_outcome = validated_command_outcome(workflow, step, &context, &output)?;
+            let command_outcome =
+                validate_and_normalize_outcome(workflow, step, &context, &output)?;
             apply_step_outcome(&mut context, step, &output, &command_outcome);
             append_step_result(&mut report, cycle, step, &command_outcome);
             if !output.success {
@@ -97,7 +99,7 @@ fn apply_step_outcome(
     context: &mut RunContext,
     step: &WorkflowStep,
     output: &StepExecution,
-    command_outcome: &WorkflowStepOutcome,
+    command_outcome: &StepOutcome,
 ) {
     if let Some(path) = &command_outcome.artifact_path {
         context
@@ -115,7 +117,7 @@ fn append_step_result(
     report: &mut AutomateReport,
     cycle: u32,
     step: &WorkflowStep,
-    command_outcome: &WorkflowStepOutcome,
+    command_outcome: &StepOutcome,
 ) {
     report.step_results.push(StepResult {
         cycle,
@@ -135,25 +137,6 @@ fn step_failure(step: &WorkflowStep, output: &StepExecution, result: &StepResult
         format_stream("stdout", &output.stdout),
         format_stream("stderr", &output.stderr)
     ))
-}
-
-fn validated_command_outcome(
-    workflow: &Workflow,
-    step: &WorkflowStep,
-    context: &RunContext,
-    output: &StepExecution,
-) -> io::Result<WorkflowStepOutcome> {
-    // The runner owns workflow-facing validation and artifact normalization.
-    //
-    // `step_outcome` decodes transport state, while this layer enforces
-    // workspace-local artifact paths before placeholder expansion and stores
-    // clean-loop state for later `evaluate_clean_stop`.
-    let mut outcome = command_outcome_for_step(workflow, step, context, output)?;
-    if let Some(path) = outcome.artifact_path.take() {
-        outcome.artifact_path = Some(normalize_artifact_path(&path, &context.workspace_root)?);
-    }
-
-    Ok(outcome)
 }
 
 fn format_stream(label: &str, content: &str) -> String {
@@ -284,7 +267,7 @@ mod tests {
             stderr: String::new(),
             command_outcome: None,
         };
-        let outcome = WorkflowStepOutcome {
+        let outcome = StepOutcome {
             status_code: Some(0),
             artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
             clean: Some(true),

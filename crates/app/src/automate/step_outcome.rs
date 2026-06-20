@@ -11,6 +11,13 @@ use super::transport::{decode_command_outcome, normalized_status_code};
 use super::workflow_model::{Workflow, WorkflowStep, WorkflowStepKind};
 use super::workflow_runner::RunContext;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StepOutcome {
+    pub(crate) status_code: Option<i32>,
+    pub(crate) artifact_path: Option<PathBuf>,
+    pub(crate) clean: Option<bool>,
+}
+
 struct StepCommandSpec {
     current_dir: PathBuf,
     args: Vec<String>,
@@ -170,6 +177,53 @@ fn cargo_target_dir_for_context(context: &RunContext, process_id: u32) -> PathBu
 
 fn child_current_dir(context: &RunContext) -> &Path {
     &context.workspace_root
+}
+
+pub(crate) fn validate_and_normalize_outcome(
+    workflow: &Workflow,
+    step: &WorkflowStep,
+    context: &RunContext,
+    output: &StepExecution,
+) -> io::Result<StepOutcome> {
+    let mut outcome = command_outcome_for_step(workflow, step, context, output)?;
+    if let Some(path) = outcome.artifact_path.take() {
+        outcome.artifact_path = Some(super::artifact_resolution::normalize_artifact_path(
+            &path,
+            &context.workspace_root,
+        )?);
+    }
+
+    Ok(outcome)
+}
+
+pub(crate) fn command_outcome_for_step(
+    _workflow: &Workflow,
+    step: &WorkflowStep,
+    _context: &RunContext,
+    output: &StepExecution,
+) -> io::Result<StepOutcome> {
+    if let Some(outcome) = &output.command_outcome {
+        let mut outcome = outcome.clone();
+        outcome.status_code = normalized_status_code(outcome.status_code);
+        return Ok(StepOutcome {
+            status_code: outcome.status_code,
+            artifact_path: outcome.artifact_path,
+            clean: outcome.clean,
+        });
+    }
+
+    if matches!(step.kind, WorkflowStepKind::DirectRun) {
+        return Ok(StepOutcome {
+            status_code: normalized_status_code(output.status_code),
+            artifact_path: None,
+            clean: None,
+        });
+    }
+
+    Err(io::Error::other(format!(
+        "l'etape automate '{}' doit produire un resultat structure",
+        step.name
+    )))
 }
 
 #[cfg(test)]

@@ -92,32 +92,29 @@ pub fn parse_args_for_context(
         "fix-loop",
         parse_input_kind,
     )?;
-    let parse_context = service_command::prepare_parse_context_for_context(
+    let prepared = service_command::prepare_prompted_service(
         &common,
         FIX_LOOP_DESCRIPTOR,
         context.clone(),
-    );
-    let workspace_root = parse_context.workspace_root.clone();
-    let artifact_path = resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
-        .map_err(ParseOutcome::Error)?;
-    let prompt = build_prompt(
-        &workspace_root,
-        input_kind,
-        &artifact_path,
-        &parse_context.output_dir,
-    );
-    let service = service_command::prepare_service_from_prompt(
-        &common,
-        &parse_context,
-        FIX_LOOP_DESCRIPTOR,
-        prompt,
-    );
+        |parse_context| {
+            let artifact_path =
+                resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
+                    .map_err(ParseOutcome::Error)?;
+            let prompt = build_prompt(
+                &parse_context.workspace_root,
+                input_kind,
+                &artifact_path,
+                &parse_context.output_dir,
+            );
+            Ok((artifact_path, prompt))
+        },
+    )?;
 
     Ok(FixLoopCommand {
-        service,
-        workspace_root,
+        service: prepared.service,
+        workspace_root: prepared.workspace_root,
         input_kind,
-        artifact_path,
+        artifact_path: prepared.resolved,
     })
 }
 

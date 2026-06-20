@@ -96,29 +96,29 @@ pub fn parse_args_for_context(
         ))),
     })?;
 
-    let parse_context = service_command::prepare_parse_context_for_context(
+    let prepared = service_command::prepare_prompted_service(
         &common,
         AUDIT_DESCRIPTOR,
         context.clone(),
-    );
-    let workspace_root = parse_context.workspace_root.clone();
-    let target_dir = resolve_target_dir(
-        target_dir.unwrap_or_else(|| workspace_root.clone()),
-        &parse_context.context,
-    )
-    .map_err(ParseOutcome::Error)?;
-    let prompt = build_prompt(&workspace_root, &target_dir, &parse_context.output_dir);
-    let service = service_command::prepare_service_from_prompt(
-        &common,
-        &parse_context,
-        AUDIT_DESCRIPTOR,
-        prompt,
-    );
+        |parse_context| {
+            let target_dir = resolve_target_dir(
+                target_dir.unwrap_or_else(|| parse_context.workspace_root.clone()),
+                &parse_context.context,
+            )
+            .map_err(ParseOutcome::Error)?;
+            let prompt = build_prompt(
+                &parse_context.workspace_root,
+                &target_dir,
+                &parse_context.output_dir,
+            );
+            Ok((target_dir, prompt))
+        },
+    )?;
 
     Ok(AuditCommand {
-        service,
-        workspace_root,
-        target_dir,
+        service: prepared.service,
+        workspace_root: prepared.workspace_root,
+        target_dir: prepared.resolved,
     })
 }
 

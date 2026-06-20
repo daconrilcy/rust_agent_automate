@@ -1,50 +1,9 @@
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::codex;
 use crate::reporting::CommandOutcome;
-
-use super::step_outcome::StepExecution;
-use super::workflow_model::{Workflow, WorkflowStep, WorkflowStepKind};
-use super::workflow_runner::RunContext;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkflowStepOutcome {
-    pub(crate) status_code: Option<i32>,
-    pub(crate) artifact_path: Option<PathBuf>,
-    pub(crate) clean: Option<bool>,
-}
-
-pub(crate) fn command_outcome_for_step(
-    _workflow: &Workflow,
-    step: &WorkflowStep,
-    _context: &RunContext,
-    output: &StepExecution,
-) -> io::Result<WorkflowStepOutcome> {
-    if let Some(outcome) = &output.command_outcome {
-        let mut outcome = outcome.clone();
-        outcome.status_code = normalized_status_code(outcome.status_code);
-        return Ok(WorkflowStepOutcome {
-            status_code: outcome.status_code,
-            artifact_path: outcome.artifact_path,
-            clean: outcome.clean,
-        });
-    }
-
-    if matches!(step.kind, WorkflowStepKind::DirectRun) {
-        return Ok(WorkflowStepOutcome {
-            status_code: normalized_status_code(output.status_code),
-            artifact_path: None,
-            clean: None,
-        });
-    }
-
-    Err(io::Error::other(format!(
-        "l'etape automate '{}' doit produire un resultat structure",
-        step.name
-    )))
-}
 
 pub(crate) fn decode_command_outcome(path: &Path) -> io::Result<Option<CommandOutcome>> {
     let content = match fs::read(path) {
@@ -66,9 +25,12 @@ pub(crate) fn normalized_status_code(status_code: Option<i32>) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
 
     use super::*;
+    use crate::automate::step_outcome::{StepExecution, command_outcome_for_step};
     use crate::automate::workflow_model::parse_workflow;
+    use crate::automate::workflow_runner::RunContext;
 
     #[test]
     fn decode_command_outcome_rejects_invalid_json() {

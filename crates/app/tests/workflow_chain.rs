@@ -156,3 +156,73 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     let _ = fs::remove_dir_all(runner_dir);
     let _ = fs::remove_dir_all(workspace);
 }
+
+#[test]
+fn workflow_stops_after_clean_implementation_audit_cycle() {
+    let workspace = support::temp_dir("workflow_clean_stop");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
+    let log_path = workspace.join("codex.log");
+    let workflow_path = workspace.join("workflow.json");
+    let target_dir = workspace.join("target");
+    let plan_path = workspace.join(".plan").join("plan.md");
+    fs::create_dir_all(&target_dir).expect("creation du dossier cible");
+    fs::create_dir_all(plan_path.parent().expect("parent du plan"))
+        .expect("creation du dossier plan");
+    fs::write(&plan_path, "# plan").expect("ecriture du plan");
+
+    let escaped_plan_path = plan_path.display().to_string().replace('\\', "\\\\");
+    let workflow = format!(
+        r#"{{
+      "steps": [
+        {{
+          "name": "alignment_audit",
+          "rust_command": ["implementation-audit", "{}"]
+        }},
+        {{
+          "name": "commit",
+          "rust_command": ["--mode", "exec", "Commit"]
+        }}
+      ],
+      "loop_policy": {{"audit_step":"alignment_audit","max_cycles":3}}
+    }}"#,
+        escaped_plan_path
+    );
+    fs::write(&workflow_path, workflow).expect("ecriture du workflow");
+
+    let mut command = support::build_command();
+    command
+        .current_dir(&workspace)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
+        .env(
+            "PATH",
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+        )
+        .env("USERPROFILE", &workspace)
+        .env("FAKE_CODEX_LOG", &log_path)
+        .env(
+            "FAKE_CODEX_MESSAGE",
+            "# Rust Implementation Plan Audit\n\n## Deviations\nNo actionable deviations found.\n",
+        )
+        .args([
+            "automate",
+            workflow_path.to_str().expect("workflow path utf-8"),
+            "Initial prompt",
+        ]);
+
+    let output = command.output().expect("execution de l'automate");
+    assert!(output.status.success(), "sortie inattendue: {:?}", output);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Automate termine apres 1 cycle(s)"),
+        "le workflow doit s'arreter apres un cycle propre: {stdout}"
+    );
+
+    assert!(
+        !stdout.contains("cycle 2"),
+        "aucun second cycle ne doit etre execute: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+}

@@ -130,34 +130,31 @@ pub fn parse_args_for_context(
             duplicate_optional_message: "le chemin d'implementation a deja ete fourni",
         },
     )?;
-    let parse_context = service_command::prepare_parse_context_for_context(
+    let prepared = service_command::prepare_prompted_service(
         &common,
         IMPLEMENTATION_AUDIT_DESCRIPTOR,
         context.clone(),
-    );
-    let workspace_root = parse_context.workspace_root.clone();
-    let plan_path =
-        resolve_plan_file(plan_path, &parse_context.context).map_err(ParseOutcome::Error)?;
-    let implementation_path = implementation_path
-        .map(|path| resolve_implementation_path(path, &parse_context.context))
-        .transpose()
-        .map_err(ParseOutcome::Error)?;
-    let prompt = build_prompt(
-        &workspace_root,
-        &plan_path,
-        implementation_path.as_deref(),
-        &parse_context.output_dir,
-    );
-    let service = service_command::prepare_service_from_prompt(
-        &common,
-        &parse_context,
-        IMPLEMENTATION_AUDIT_DESCRIPTOR,
-        prompt,
-    );
+        |parse_context| {
+            let plan_path = resolve_plan_file(plan_path, &parse_context.context)
+                .map_err(ParseOutcome::Error)?;
+            let implementation_path = implementation_path
+                .map(|path| resolve_implementation_path(path, &parse_context.context))
+                .transpose()
+                .map_err(ParseOutcome::Error)?;
+            let prompt = build_prompt(
+                &parse_context.workspace_root,
+                &plan_path,
+                implementation_path.as_deref(),
+                &parse_context.output_dir,
+            );
+            Ok(((plan_path, implementation_path), prompt))
+        },
+    )?;
+    let (plan_path, implementation_path) = prepared.resolved;
 
     Ok(ImplementationAuditCommand {
-        service,
-        workspace_root,
+        service: prepared.service,
+        workspace_root: prepared.workspace_root,
         plan_path,
         implementation_path,
     })

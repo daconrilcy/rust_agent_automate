@@ -66,7 +66,8 @@ fn main() {
         std::process::exit(1);
     };
 
-    let _ = fs::write(out, "fake final message");
+    let message = env::var("FAKE_CODEX_MESSAGE").unwrap_or_else(|_| "fake final message".to_string());
+    let _ = fs::write(out, message);
 }
 "#;
 

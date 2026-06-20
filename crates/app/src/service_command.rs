@@ -11,8 +11,10 @@ pub use args::{
     parse_required_path_with_optional_named_path, parse_subject_and_artifact,
     parse_with_common_options,
 };
+#[allow(unused_imports)]
 pub use context::{
-    prepare_parse_context_for_context, prepare_service_from_prompt, resolve_context,
+    PreparedPromptedService, prepare_parse_context_for_context, prepare_prompted_service,
+    prepare_service_from_prompt, resolve_context,
 };
 pub use dispatch::ServiceCommandDispatch;
 pub use exec::{execute_service_command, execute_service_command_silently, save_markdown_artifact};

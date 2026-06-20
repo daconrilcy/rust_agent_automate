@@ -154,7 +154,7 @@ fn parse_service_command(
     let context = match context {
         Some(context) => context.clone(),
         None => crate::service_command::resolve_context()
-            .map_err(|error| ParseOutcome::Error(error.to_string()))?,
+            .map_err(crate::service_command::parse_error)?,
     };
     let dispatch = kind.parse_for_context(&args[1..], &context)?;
     Ok(CliCommand::Service(dispatch))

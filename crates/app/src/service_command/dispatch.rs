@@ -38,6 +38,63 @@ impl ServiceCommandDispatch {
         }
     }
 
+    pub fn output_dir(&self) -> &Path {
+        match self {
+            Self::Audit(command) => &command.service.output_dir,
+            Self::Plan(command) => &command.service.output_dir,
+            Self::ImplementationAudit(command) => &command.service.output_dir,
+            Self::Review(command) => &command.service.output_dir,
+            Self::FixLoop(command) => &command.service.output_dir,
+        }
+    }
+
+    pub fn timeout(&self) -> std::time::Duration {
+        match self {
+            Self::Audit(command) => command.service.timeout,
+            Self::Plan(command) => command.service.timeout,
+            Self::ImplementationAudit(command) => command.service.timeout,
+            Self::Review(command) => command.service.timeout,
+            Self::FixLoop(command) => command.service.timeout,
+        }
+    }
+
+    pub fn as_audit(&self) -> Option<&crate::audit::AuditCommand> {
+        match self {
+            Self::Audit(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    pub fn as_plan(&self) -> Option<&crate::plan::PlanCommand> {
+        match self {
+            Self::Plan(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    pub fn as_implementation_audit(
+        &self,
+    ) -> Option<&crate::implementation_audit::ImplementationAuditCommand> {
+        match self {
+            Self::ImplementationAudit(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    pub fn as_review(&self) -> Option<&crate::review::ReviewCommand> {
+        match self {
+            Self::Review(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    pub fn as_fix_loop(&self) -> Option<&crate::fix_loop::FixLoopCommand> {
+        match self {
+            Self::FixLoop(command) => Some(command),
+            _ => None,
+        }
+    }
+
     pub fn execute(&self) -> Result<CompletedReport, ReportFailure> {
         let lifecycle = self.lifecycle();
         super::execute_service_command(

@@ -101,8 +101,7 @@ pub fn save_audit(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
-    let context = service_command::resolve_context()
-        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+    let context = service_command::resolve_context().map_err(service_command::parse_error)?;
     parse_args_for_context(args, &context)
 }
 

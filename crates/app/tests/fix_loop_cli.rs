@@ -3,18 +3,17 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
+use app::ReviewSubject;
 use app::codex::CodexMode;
-use app::service_command::ServiceCommandDispatch;
-use app::{CliCommand, ReviewSubject};
 
 use support::parse;
 
 #[test]
 fn fix_loop_prompt_mentions_skill_and_input_kind() {
     let command = parse(&["fix-loop", "plan", "Cargo.toml"]).expect("fix-loop parse");
-    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
-        panic!("la commande attendue est fix-loop");
-    };
+    let fix_loop = command
+        .as_fix_loop()
+        .expect("la commande attendue est fix-loop");
     let prompt = fix_loop
         .service
         .request
@@ -81,10 +80,9 @@ fn fix_loop_command_runs_end_to_end_and_saves_the_expected_artifact() {
 #[test]
 fn parses_fix_loop_command_with_positional_type_and_artifact() {
     let command = parse(&["fix-loop", "plan", "Cargo.toml"]).expect("fix-loop parse");
-
-    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
-        panic!("la commande attendue est fix-loop");
-    };
+    let fix_loop = command
+        .as_fix_loop()
+        .expect("la commande attendue est fix-loop");
 
     assert_eq!(fix_loop.service.request.mode, CodexMode::Exec);
     assert_eq!(fix_loop.input_kind, ReviewSubject::Plan);
@@ -105,10 +103,9 @@ fn parses_fix_loop_alias_with_named_type_and_artifact() {
         "--verbose",
     ])
     .expect("loop options nommees");
-
-    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
-        panic!("la commande attendue est fix-loop");
-    };
+    let fix_loop = command
+        .as_fix_loop()
+        .expect("la commande attendue est fix-loop");
 
     assert_eq!(fix_loop.input_kind, ReviewSubject::Implementation);
     assert_eq!(fix_loop.service.timeout, Duration::from_secs(42));

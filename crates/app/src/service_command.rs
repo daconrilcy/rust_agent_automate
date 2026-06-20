@@ -6,20 +6,15 @@ mod dispatch;
 mod exec;
 mod spec;
 
-#[allow(unused_imports)]
 pub use args::{
     ServiceCommandParseError, parse_required_path_with_optional_named_path,
     parse_subject_and_artifact, parse_with_common_options,
 };
-#[allow(unused_imports)]
 pub(crate) use context::{
-    PreparedPromptedService, prepare_parse_context_for_context, prepare_prompted_service,
-    prepare_required_path_service, prepare_service_command, prepare_service_from_prompt,
-    resolve_context,
+    prepare_prompted_service, prepare_required_path_service, resolve_context,
 };
 pub use dispatch::ServiceCommandDispatch;
 pub use exec::{execute_service_command, execute_service_command_silently, save_markdown_artifact};
-#[allow(unused_imports)]
 pub use spec::{
     AUDIT_SERVICE_COMMAND_SPEC, FIX_LOOP_SERVICE_COMMAND_SPEC,
     IMPLEMENTATION_AUDIT_SERVICE_COMMAND_SPEC, PLAN_SERVICE_COMMAND_SPEC,
@@ -27,6 +22,7 @@ pub use spec::{
     ServiceCommandKind, ServiceCommandOptions, ServiceCommandSpec,
 };
 
+use crate::cli::ParseOutcome;
 use crate::codex::CodexRequest;
 use crate::service_paths::ExecutionContext;
 
@@ -80,4 +76,8 @@ pub(crate) fn dispatch_service_args_for_context(
     };
 
     kind.parse_for_context(&args[1..], context).map(Some)
+}
+
+pub fn parse_error(error: impl std::fmt::Display) -> ParseOutcome {
+    ParseOutcome::Error(error.to_string())
 }

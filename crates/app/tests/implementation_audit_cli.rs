@@ -3,9 +3,7 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
 
@@ -13,9 +11,9 @@ use support::parse;
 fn implementation_audit_prompt_mentions_skill_and_default_scope() {
     let command =
         parse(&["implementation-audit", "Cargo.toml"]).expect("implementation-audit parse");
-    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
-        panic!("la commande attendue est implementation-audit");
-    };
+    let audit = command
+        .as_implementation_audit()
+        .expect("la commande attendue est implementation-audit");
     let prompt = audit
         .service
         .request
@@ -40,9 +38,9 @@ fn implementation_audit_prompt_mentions_explicit_scope() {
         ".",
     ])
     .expect("implementation-audit scope explicite");
-    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
-        panic!("la commande attendue est implementation-audit");
-    };
+    let audit = command
+        .as_implementation_audit()
+        .expect("la commande attendue est implementation-audit");
     let prompt = audit
         .service
         .request
@@ -118,10 +116,9 @@ fn implementation_audit_command_runs_end_to_end_and_saves_the_expected_artifact(
 fn parses_implementation_audit_command_with_positional_plan_path() {
     let command = parse(&["implementation-audit", "Cargo.toml"])
         .expect("implementation-audit doit etre parse");
-
-    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
-        panic!("la commande attendue est implementation-audit");
-    };
+    let audit = command
+        .as_implementation_audit()
+        .expect("la commande attendue est implementation-audit");
 
     assert_eq!(audit.service.request.mode, CodexMode::Exec);
     assert_eq!(audit.service.request.model, DEFAULT_MODEL);
@@ -147,10 +144,9 @@ fn parses_implementation_audit_command_with_named_options() {
         "--verbose",
     ])
     .expect("impl-audit options nommees");
-
-    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
-        panic!("la commande attendue est implementation-audit");
-    };
+    let audit = command
+        .as_implementation_audit()
+        .expect("la commande attendue est implementation-audit");
 
     assert_eq!(audit.service.timeout, Duration::from_secs(42));
     assert!(audit.service.request.verbose);

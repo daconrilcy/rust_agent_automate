@@ -69,8 +69,7 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
-    let context = service_command::resolve_context()
-        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+    let context = service_command::resolve_context().map_err(service_command::parse_error)?;
     parse_args_for_context(args, &context)
 }
 
@@ -98,7 +97,7 @@ pub fn parse_args_for_context(
         |parse_context| {
             let artifact_path =
                 resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
-                    .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+                    .map_err(service_command::parse_error)?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 input_kind,

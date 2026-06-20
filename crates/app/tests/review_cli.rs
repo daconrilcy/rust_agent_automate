@@ -3,9 +3,8 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
+use app::ReviewSubject;
 use app::codex::CodexMode;
-use app::service_command::ServiceCommandDispatch;
-use app::{CliCommand, ReviewSubject};
 
 use support::parse;
 
@@ -23,9 +22,9 @@ fn review_subjects_parse_from_public_type() {
 #[test]
 fn review_prompt_mentions_mode_and_paths() {
     let command = parse(&["review", "plan", "Cargo.toml"]).expect("review parse");
-    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
-        panic!("la commande attendue est review");
-    };
+    let review = command
+        .as_review()
+        .expect("la commande attendue est review");
     let prompt = review
         .service
         .request
@@ -101,10 +100,9 @@ fn review_command_runs_end_to_end_and_saves_the_expected_artifact() {
 #[test]
 fn parses_review_command_with_positional_type_and_artifact() {
     let command = parse(&["review", "implementation", "."]).expect("review parse");
-
-    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
-        panic!("la commande attendue est review");
-    };
+    let review = command
+        .as_review()
+        .expect("la commande attendue est review");
 
     assert_eq!(review.service.request.mode, CodexMode::Exec);
     assert_eq!(review.subject, ReviewSubject::Implementation);
@@ -125,10 +123,9 @@ fn parses_review_command_with_named_type_and_artifact() {
         "--verbose",
     ])
     .expect("review options nommees");
-
-    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
-        panic!("la commande attendue est review");
-    };
+    let review = command
+        .as_review()
+        .expect("la commande attendue est review");
 
     assert_eq!(review.subject, ReviewSubject::Audit);
     assert_eq!(review.service.timeout, Duration::from_secs(42));

@@ -3,18 +3,14 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use app::service_command::ServiceCommandDispatch;
 
 use support::{normalize_path, parse};
 
 #[test]
 fn audit_prompt_mentions_skill_and_paths() {
     let command = parse(&["audit", "--target", "."]).expect("audit parse");
-    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
-        panic!("la commande attendue est audit");
-    };
+    let audit = command.as_audit().expect("la commande attendue est audit");
     let prompt = audit
         .service
         .request
@@ -86,10 +82,7 @@ fn audit_command_runs_end_to_end_and_executes_codex_from_the_workspace_root() {
 #[test]
 fn parses_audit_command() {
     let command = parse(&["audit", "--verbose"]).expect("audit doit etre parse");
-
-    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
-        panic!("la commande attendue est audit");
-    };
+    let audit = command.as_audit().expect("la commande attendue est audit");
 
     assert_eq!(audit.service.request.mode, CodexMode::Exec);
     assert_eq!(audit.service.request.model, DEFAULT_MODEL);
@@ -109,10 +102,7 @@ fn parses_audit_command() {
 #[test]
 fn parses_audit_timeout_argument() {
     let command = parse(&["audit", "--timeout-seconds", "42"]).expect("audit timeout configurable");
-
-    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
-        panic!("la commande attendue est audit");
-    };
+    let audit = command.as_audit().expect("la commande attendue est audit");
 
     assert_eq!(audit.service.timeout, Duration::from_secs(42));
 }
@@ -132,10 +122,7 @@ fn rejects_zero_audit_timeout() {
 #[test]
 fn parses_audit_target_argument() {
     let command = parse(&["audit", "--target", "."]).expect("audit cible");
-
-    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
-        panic!("la commande attendue est audit");
-    };
+    let audit = command.as_audit().expect("la commande attendue est audit");
 
     assert_eq!(
         normalize_path(&audit.target_dir),

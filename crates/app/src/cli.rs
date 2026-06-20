@@ -25,6 +25,35 @@ pub enum ParseLoopControl {
 }
 
 impl CliCommand {
+    pub fn service(&self) -> Option<&ServiceCommandDispatch> {
+        match self {
+            Self::Service(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    pub fn as_audit(&self) -> Option<&crate::audit::AuditCommand> {
+        self.service()?.as_audit()
+    }
+
+    pub fn as_plan(&self) -> Option<&crate::plan::PlanCommand> {
+        self.service()?.as_plan()
+    }
+
+    pub fn as_implementation_audit(
+        &self,
+    ) -> Option<&crate::implementation_audit::ImplementationAuditCommand> {
+        self.service()?.as_implementation_audit()
+    }
+
+    pub fn as_review(&self) -> Option<&crate::review::ReviewCommand> {
+        self.service()?.as_review()
+    }
+
+    pub fn as_fix_loop(&self) -> Option<&crate::fix_loop::FixLoopCommand> {
+        self.service()?.as_fix_loop()
+    }
+
     pub fn execute(self) -> i32 {
         match self {
             Self::Run(request) => run_request(&request),

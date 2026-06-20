@@ -149,15 +149,12 @@ impl std::fmt::Display for TargetDirResolutionError {
 
 impl std::error::Error for TargetDirResolutionError {}
 
-#[allow(unused_imports)]
 pub use step_outcome::{AutomateReport, StepResult};
-#[allow(unused_imports)]
 pub use workflow_model::{
     AutomateCommand, LoopPolicy, RefactorAutomateCommand, Workflow, WorkflowDefaults,
     WorkflowParseError, WorkflowStep, WorkflowStepKind, default_refactor_workflow, load_workflow,
     parse_workflow,
 };
-#[allow(unused_imports)]
 pub use workflow_runner::run_workflow;
 
 #[derive(Debug)]

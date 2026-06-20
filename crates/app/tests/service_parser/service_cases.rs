@@ -41,17 +41,10 @@ fn service_commands_preserve_named_output_dirs() {
 
     for (name, result) in cases {
         let command = result.expect("parse service command");
-        let CliCommand::Service(dispatch) = command else {
-            panic!("{name} doit etre une commande service");
-        };
-
-        let output_dir = match dispatch {
-            ServiceCommandDispatch::Audit(command) => command.service.output_dir,
-            ServiceCommandDispatch::Plan(command) => command.service.output_dir,
-            ServiceCommandDispatch::ImplementationAudit(command) => command.service.output_dir,
-            ServiceCommandDispatch::Review(command) => command.service.output_dir,
-            ServiceCommandDispatch::FixLoop(command) => command.service.output_dir,
-        };
+        let dispatch = command
+            .service()
+            .unwrap_or_else(|| panic!("{name} doit etre une commande service"));
+        let output_dir = dispatch.output_dir();
 
         assert!(
             output_dir.to_string_lossy().contains("-custom"),
@@ -77,17 +70,10 @@ fn service_commands_preserve_timeout_seconds() {
 
     for (expected_timeout, result) in [41_u64, 42, 43, 44, 45].into_iter().zip(cases) {
         let command = result.expect("parse service command");
-        let CliCommand::Service(dispatch) = command else {
-            panic!("la commande doit etre une commande service");
-        };
-
-        let timeout = match dispatch {
-            ServiceCommandDispatch::Audit(command) => command.service.timeout,
-            ServiceCommandDispatch::Plan(command) => command.service.timeout,
-            ServiceCommandDispatch::ImplementationAudit(command) => command.service.timeout,
-            ServiceCommandDispatch::Review(command) => command.service.timeout,
-            ServiceCommandDispatch::FixLoop(command) => command.service.timeout,
-        };
+        let dispatch = command
+            .service()
+            .expect("la commande doit etre une commande service");
+        let timeout = dispatch.timeout();
 
         assert_eq!(timeout, Duration::from_secs(expected_timeout));
     }
@@ -121,16 +107,10 @@ fn every_registered_subcommand_routes_help() {
 #[test]
 fn registered_aliases_resolve_to_expected_command_variants() {
     let impl_alias = parse(&["impl-audit", "Cargo.toml"]).expect("alias impl-audit");
-    assert!(matches!(
-        impl_alias,
-        CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(_))
-    ));
+    assert!(impl_alias.as_implementation_audit().is_some());
 
     let loop_alias = parse(&["loop", "implementation", "."]).expect("alias loop");
-    assert!(matches!(
-        loop_alias,
-        CliCommand::Service(ServiceCommandDispatch::FixLoop(_))
-    ));
+    assert!(loop_alias.as_fix_loop().is_some());
 }
 
 #[test]
@@ -207,10 +187,9 @@ fn rejects_duplicate_implementation_audit_timeout_option() {
 fn parses_review_with_named_type_and_positional_artifact() {
     let command = parse(&["review", "--type", "implementation", "."])
         .expect("review doit accepter type nomme et artefact positionnel");
-
-    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
-        panic!("la commande attendue est review");
-    };
+    let review = command
+        .as_review()
+        .expect("la commande attendue est review");
 
     assert_eq!(review.subject, app::ReviewSubject::Implementation);
     assert_eq!(

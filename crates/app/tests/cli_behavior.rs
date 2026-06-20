@@ -92,11 +92,7 @@ fn audit_accepts_windows_verbatim_target_path() {
     ]);
 
     let command = parsed.expect("parse audit");
-    let app::CliCommand::Service(app::service_command::ServiceCommandDispatch::Audit(audit)) =
-        command
-    else {
-        panic!("commande audit attendue");
-    };
+    let audit = command.as_audit().expect("commande audit attendue");
 
     assert_eq!(
         audit.target_dir,
@@ -122,11 +118,7 @@ fn review_aliases_and_subjects_still_parse_through_public_cli() {
     ]);
 
     let command = parsed.expect("parse review");
-    let app::CliCommand::Service(app::service_command::ServiceCommandDispatch::Review(review)) =
-        command
-    else {
-        panic!("commande review attendue");
-    };
+    let review = command.as_review().expect("commande review attendue");
 
     assert_eq!(review.subject, ReviewSubject::Plan);
 

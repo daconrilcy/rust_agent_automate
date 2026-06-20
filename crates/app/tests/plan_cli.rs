@@ -3,18 +3,14 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
 
 #[test]
 fn plan_prompt_mentions_skill_and_paths() {
     let command = parse(&["plan", "Cargo.toml"]).expect("plan parse");
-    let CliCommand::Service(ServiceCommandDispatch::Plan(plan)) = command else {
-        panic!("la commande attendue est plan");
-    };
+    let plan = command.as_plan().expect("la commande attendue est plan");
     let prompt = plan.service.request.prompt.as_deref().expect("prompt plan");
 
     assert!(prompt.contains("$refactor-plan-from-audit"));
@@ -81,10 +77,7 @@ fn plan_command_runs_end_to_end_and_saves_the_expected_artifact() {
 #[test]
 fn parses_plan_command_with_positional_audit_path() {
     let command = parse(&["plan", "Cargo.toml"]).expect("plan doit etre parse");
-
-    let CliCommand::Service(ServiceCommandDispatch::Plan(plan)) = command else {
-        panic!("la commande attendue est plan");
-    };
+    let plan = command.as_plan().expect("la commande attendue est plan");
 
     assert_eq!(plan.service.request.mode, CodexMode::Exec);
     assert_eq!(plan.service.request.model, DEFAULT_MODEL);

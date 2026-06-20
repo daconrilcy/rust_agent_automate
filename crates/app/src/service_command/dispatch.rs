@@ -2,6 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::reporting::{CompletedReport, ReportFailure};
+use crate::service_command::{PreparedServiceCommand, ServiceCommandDescriptor};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ServiceCommandDispatch {
@@ -58,69 +59,161 @@ impl ServiceCommandDispatch {
 
     fn lifecycle(&self) -> ServiceCommandLifecycle<'_> {
         match self {
-            Self::Audit(command) => ServiceCommandLifecycle {
-                service: &command.service,
-                descriptor: crate::audit::descriptor(),
-                intro: format!(
-                    "Audit Codex en cours sur {} (timeout: {} secondes)...",
-                    command.target_dir.display(),
-                    command.service.timeout.as_secs()
-                ),
-                save: crate::audit::save_report,
-            },
-            Self::Plan(command) => ServiceCommandLifecycle {
-                service: &command.service,
-                descriptor: crate::plan::descriptor(),
-                intro: format!(
-                    "Plan Codex en cours depuis {} (timeout: {} secondes)...",
-                    command.audit_path.display(),
-                    command.service.timeout.as_secs()
-                ),
-                save: crate::plan::save_plan,
-            },
-            Self::ImplementationAudit(command) => ServiceCommandLifecycle {
-                service: &command.service,
-                descriptor: crate::implementation_audit::descriptor(),
-                intro: format!(
-                    "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
-                    command.plan_path.display(),
-                    command.implementation_path.as_deref().map_or_else(
-                        || "git diff / workspace".to_string(),
-                        |path| path.display().to_string()
-                    ),
-                    command.service.timeout.as_secs()
-                ),
-                save: crate::implementation_audit::save_audit,
-            },
-            Self::Review(command) => ServiceCommandLifecycle {
-                service: &command.service,
-                descriptor: crate::review::descriptor(),
-                intro: format!(
-                    "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
-                    command.subject,
-                    command.artifact_path.display(),
-                    command.service.timeout.as_secs()
-                ),
-                save: crate::review::save_review,
-            },
-            Self::FixLoop(command) => ServiceCommandLifecycle {
-                service: &command.service,
-                descriptor: crate::fix_loop::descriptor(),
-                intro: format!(
-                    "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
-                    command.input_kind,
-                    command.artifact_path.display(),
-                    command.service.timeout.as_secs()
-                ),
-                save: crate::fix_loop::save_report,
-            },
+            Self::Audit(command) => command.lifecycle(),
+            Self::Plan(command) => command.lifecycle(),
+            Self::ImplementationAudit(command) => command.lifecycle(),
+            Self::Review(command) => command.lifecycle(),
+            Self::FixLoop(command) => command.lifecycle(),
         }
     }
 }
 
 struct ServiceCommandLifecycle<'a> {
-    service: &'a crate::service_command::PreparedServiceCommand,
-    descriptor: crate::service_command::ServiceCommandDescriptor<'static>,
+    service: &'a PreparedServiceCommand,
+    descriptor: ServiceCommandDescriptor<'static>,
     intro: String,
     save: fn(&Path, &str) -> io::Result<PathBuf>,
+}
+
+impl<'a> ServiceCommandLifecycle<'a> {
+    fn new(
+        service: &'a PreparedServiceCommand,
+        descriptor: ServiceCommandDescriptor<'static>,
+        save: fn(&Path, &str) -> io::Result<PathBuf>,
+        intro: String,
+    ) -> Self {
+        Self {
+            service,
+            descriptor,
+            intro,
+            save,
+        }
+    }
+}
+
+trait ServiceCommandLifecycleSource {
+    fn service(&self) -> &PreparedServiceCommand;
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static>;
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf>;
+    fn intro(&self) -> String;
+
+    fn lifecycle(&self) -> ServiceCommandLifecycle<'_> {
+        ServiceCommandLifecycle::new(self.service(), self.descriptor(), self.save(), self.intro())
+    }
+}
+
+impl ServiceCommandLifecycleSource for crate::audit::AuditCommand {
+    fn service(&self) -> &PreparedServiceCommand {
+        &self.service
+    }
+
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
+        crate::audit::descriptor()
+    }
+
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
+        crate::audit::save_report
+    }
+
+    fn intro(&self) -> String {
+        format!(
+            "Audit Codex en cours sur {} (timeout: {} secondes)...",
+            self.target_dir.display(),
+            self.service.timeout.as_secs()
+        )
+    }
+}
+
+impl ServiceCommandLifecycleSource for crate::plan::PlanCommand {
+    fn service(&self) -> &PreparedServiceCommand {
+        &self.service
+    }
+
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
+        crate::plan::descriptor()
+    }
+
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
+        crate::plan::save_plan
+    }
+
+    fn intro(&self) -> String {
+        format!(
+            "Plan Codex en cours depuis {} (timeout: {} secondes)...",
+            self.audit_path.display(),
+            self.service.timeout.as_secs()
+        )
+    }
+}
+
+impl ServiceCommandLifecycleSource for crate::implementation_audit::ImplementationAuditCommand {
+    fn service(&self) -> &PreparedServiceCommand {
+        &self.service
+    }
+
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
+        crate::implementation_audit::descriptor()
+    }
+
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
+        crate::implementation_audit::save_audit
+    }
+
+    fn intro(&self) -> String {
+        format!(
+            "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
+            self.plan_path.display(),
+            self.implementation_path.as_deref().map_or_else(
+                || "git diff / workspace".to_string(),
+                |path| path.display().to_string()
+            ),
+            self.service.timeout.as_secs()
+        )
+    }
+}
+
+impl ServiceCommandLifecycleSource for crate::review::ReviewCommand {
+    fn service(&self) -> &PreparedServiceCommand {
+        &self.service
+    }
+
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
+        crate::review::descriptor()
+    }
+
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
+        crate::review::save_review
+    }
+
+    fn intro(&self) -> String {
+        format!(
+            "Review adversariale Codex en cours ({}) sur {} (timeout: {} secondes)...",
+            self.subject,
+            self.artifact_path.display(),
+            self.service.timeout.as_secs()
+        )
+    }
+}
+
+impl ServiceCommandLifecycleSource for crate::fix_loop::FixLoopCommand {
+    fn service(&self) -> &PreparedServiceCommand {
+        &self.service
+    }
+
+    fn descriptor(&self) -> ServiceCommandDescriptor<'static> {
+        crate::fix_loop::descriptor()
+    }
+
+    fn save(&self) -> fn(&Path, &str) -> io::Result<PathBuf> {
+        crate::fix_loop::save_report
+    }
+
+    fn intro(&self) -> String {
+        format!(
+            "Boucle review/correction Codex en cours ({}) sur {} (timeout: {} secondes)...",
+            self.input_kind,
+            self.artifact_path.display(),
+            self.service.timeout.as_secs()
+        )
+    }
 }

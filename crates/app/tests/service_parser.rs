@@ -133,6 +133,99 @@ fn codex_commands_accept_model_and_reasoning_overrides() {
 }
 
 #[test]
+fn service_commands_preserve_named_output_dirs() {
+    let cases = [
+        ("audit", parse(&["audit", "--output-dir", ".audit-custom"])),
+        (
+            "plan",
+            parse(&["plan", "Cargo.toml", "--output-dir", ".plan-custom"]),
+        ),
+        (
+            "implementation-audit",
+            parse(&[
+                "implementation-audit",
+                "Cargo.toml",
+                "--output-dir",
+                ".audit-custom",
+            ]),
+        ),
+        (
+            "review",
+            parse(&[
+                "review",
+                "implementation",
+                ".",
+                "--output-dir",
+                ".review-custom",
+            ]),
+        ),
+        (
+            "fix-loop",
+            parse(&[
+                "fix-loop",
+                "implementation",
+                ".",
+                "--output-dir",
+                ".fix-loop-custom",
+            ]),
+        ),
+    ];
+
+    for (name, result) in cases {
+        let command = result.expect("parse service command");
+        let CliCommand::Service(dispatch) = command else {
+            panic!("{name} doit etre une commande service");
+        };
+
+        let output_dir = match dispatch {
+            ServiceCommandDispatch::Audit(command) => command.service.output_dir,
+            ServiceCommandDispatch::Plan(command) => command.service.output_dir,
+            ServiceCommandDispatch::ImplementationAudit(command) => command.service.output_dir,
+            ServiceCommandDispatch::Review(command) => command.service.output_dir,
+            ServiceCommandDispatch::FixLoop(command) => command.service.output_dir,
+        };
+
+        assert!(
+            output_dir.to_string_lossy().contains("-custom"),
+            "le dossier de sortie de {name} doit reprendre la valeur nommee"
+        );
+    }
+}
+
+#[test]
+fn service_commands_preserve_timeout_seconds() {
+    let cases = [
+        parse(&["audit", "--timeout-seconds", "41"]),
+        parse(&["plan", "Cargo.toml", "--timeout-seconds", "42"]),
+        parse(&[
+            "implementation-audit",
+            "Cargo.toml",
+            "--timeout-seconds",
+            "43",
+        ]),
+        parse(&["review", "implementation", ".", "--timeout-seconds", "44"]),
+        parse(&["fix-loop", "implementation", ".", "--timeout-seconds", "45"]),
+    ];
+
+    for (expected_timeout, result) in [41_u64, 42, 43, 44, 45].into_iter().zip(cases) {
+        let command = result.expect("parse service command");
+        let CliCommand::Service(dispatch) = command else {
+            panic!("la commande doit etre une commande service");
+        };
+
+        let timeout = match dispatch {
+            ServiceCommandDispatch::Audit(command) => command.service.timeout,
+            ServiceCommandDispatch::Plan(command) => command.service.timeout,
+            ServiceCommandDispatch::ImplementationAudit(command) => command.service.timeout,
+            ServiceCommandDispatch::Review(command) => command.service.timeout,
+            ServiceCommandDispatch::FixLoop(command) => command.service.timeout,
+        };
+
+        assert_eq!(timeout, Duration::from_secs(expected_timeout));
+    }
+}
+
+#[test]
 fn every_registered_subcommand_routes_help() {
     for spec in app::registered_commands() {
         let command = vec![spec.name, "--help"];
@@ -155,6 +248,31 @@ fn every_registered_subcommand_routes_help() {
             );
         }
     }
+}
+
+#[test]
+fn static_commands_reject_service_level_codex_options() {
+    let workflow_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("workflows")
+        .join("refactor.json");
+    let workflow_path = workflow_path.to_string_lossy().into_owned();
+
+    let automate = parse(&["automate", "--model", "gpt-5.6", workflow_path.as_str()])
+        .expect_err("automate ne doit pas accepter les options Codex des commandes service");
+    assert_eq!(
+        automate,
+        ParseOutcome::Error("option inconnue: --model".to_string())
+    );
+
+    let refactor = parse(&["refactor-auto", "--model", "gpt-5.6", "Durcir"]).expect_err(
+        "refactor-automate ne doit pas accepter les options Codex des commandes service",
+    );
+    assert_eq!(
+        refactor,
+        ParseOutcome::Error("option inconnue: --model".to_string())
+    );
 }
 
 #[test]

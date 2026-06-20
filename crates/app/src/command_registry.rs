@@ -1,16 +1,14 @@
 use crate::cli::{CliCommand, ParseOutcome};
-use crate::service_command::{SERVICE_COMMAND_SPECS, ServiceCommandDispatch, ServiceCommandKind};
+use crate::service_command::{
+    SERVICE_COMMAND_SPECS, ServiceCommandDispatch, ServiceCommandKind, ServiceCommandSpec,
+};
 use crate::service_paths::ExecutionContext;
 
 type CommandParser = fn(&[String], Option<&ExecutionContext>) -> Result<CliCommand, ParseOutcome>;
 
 #[derive(Debug, Clone, Copy)]
 struct StaticCommandSpec {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    accepts_codex_options: bool,
-    usage: &'static [&'static str],
-    examples: &'static [&'static str],
+    metadata: RegisteredCommand<'static>,
     parser: CommandParser,
 }
 
@@ -35,25 +33,29 @@ pub const DIRECT_RUN_EXAMPLES: &[&str] = &[
 
 const STATIC_COMMANDS: &[StaticCommandSpec] = &[
     StaticCommandSpec {
-        name: "automate",
-        aliases: &[],
-        accepts_codex_options: false,
-        usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
-        examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
+        metadata: RegisteredCommand {
+            name: "automate",
+            aliases: &[],
+            accepts_codex_options: false,
+            usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
+            examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
+        },
         parser: |args, _context| {
             crate::automate::parse_automate_args(args).map(CliCommand::Automate)
         },
     },
     StaticCommandSpec {
-        name: "refactor-automate",
-        aliases: &["refactor-auto"],
-        accepts_codex_options: false,
-        usage: &[
-            "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [prompt]",
-        ],
-        examples: &[
-            "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",
-        ],
+        metadata: RegisteredCommand {
+            name: "refactor-automate",
+            aliases: &["refactor-auto"],
+            accepts_codex_options: false,
+            usage: &[
+                "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [prompt]",
+            ],
+            examples: &[
+                "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",
+            ],
+        },
         parser: |args, _context| {
             crate::automate::parse_refactor_automate_args(args).map(CliCommand::RefactorAutomate)
         },
@@ -61,59 +63,23 @@ const STATIC_COMMANDS: &[StaticCommandSpec] = &[
 ];
 
 pub fn registered_commands() -> Vec<RegisteredCommand<'static>> {
-    let service_commands = SERVICE_COMMAND_SPECS.iter().map(|spec| RegisteredCommand {
-        name: spec.name,
-        aliases: spec.aliases,
-        accepts_codex_options: spec.accepts_codex_options,
-        usage: spec.usage,
-        examples: spec.examples,
-    });
-    let static_commands = STATIC_COMMANDS.iter().map(|spec| RegisteredCommand {
-        name: spec.name,
-        aliases: spec.aliases,
-        accepts_codex_options: spec.accepts_codex_options,
-        usage: spec.usage,
-        examples: spec.examples,
-    });
+    let service_commands = SERVICE_COMMAND_SPECS.iter().map(RegisteredCommand::from);
+    let static_commands = STATIC_COMMANDS.iter().map(|spec| spec.metadata);
 
     service_commands.chain(static_commands).collect()
 }
 
 pub fn is_known_subcommand(value: &str) -> bool {
-    SERVICE_COMMAND_SPECS
-        .iter()
-        .any(|spec| spec.name == value || spec.aliases.contains(&value))
-        || STATIC_COMMANDS
-            .iter()
-            .any(|spec| spec.name == value || spec.aliases.contains(&value))
+    lookup_registered_command(value).is_some()
 }
 
 pub fn canonical_name(value: Option<&str>) -> Option<&'static str> {
-    let value = value?;
-
-    SERVICE_COMMAND_SPECS
-        .iter()
-        .find(|spec| spec.name == value || spec.aliases.contains(&value))
-        .map(|spec| spec.name)
-        .or_else(|| {
-            STATIC_COMMANDS
-                .iter()
-                .find(|spec| spec.name == value || spec.aliases.contains(&value))
-                .map(|spec| spec.name)
-        })
+    lookup_registered_command(value?).map(|spec| spec.name)
 }
 
 pub fn accepts_codex_options(value: &str) -> bool {
-    SERVICE_COMMAND_SPECS
-        .iter()
-        .find(|spec| spec.name == value || spec.aliases.contains(&value))
+    lookup_registered_command(value)
         .map(|spec| spec.accepts_codex_options)
-        .or_else(|| {
-            STATIC_COMMANDS
-                .iter()
-                .find(|spec| spec.name == value || spec.aliases.contains(&value))
-                .map(|spec| spec.accepts_codex_options)
-        })
         .unwrap_or(false)
 }
 
@@ -122,25 +88,15 @@ pub fn is_direct_run(value: Option<&str>) -> bool {
 }
 
 pub fn usage_lines() -> impl Iterator<Item = &'static str> {
-    SERVICE_COMMAND_SPECS
-        .iter()
+    registered_commands()
+        .into_iter()
         .flat_map(|spec| spec.usage.iter().copied())
-        .chain(
-            STATIC_COMMANDS
-                .iter()
-                .flat_map(|spec| spec.usage.iter().copied()),
-        )
 }
 
 pub fn example_lines() -> impl Iterator<Item = &'static str> {
-    SERVICE_COMMAND_SPECS
-        .iter()
+    registered_commands()
+        .into_iter()
         .flat_map(|spec| spec.examples.iter().copied())
-        .chain(
-            STATIC_COMMANDS
-                .iter()
-                .flat_map(|spec| spec.examples.iter().copied()),
-        )
 }
 
 pub fn parse_registered_subcommand(args: &[String]) -> Option<Result<CliCommand, ParseOutcome>> {
@@ -161,9 +117,34 @@ pub fn parse_registered_subcommand_for_context(
 
     STATIC_COMMANDS
         .iter()
-        .find(|spec| spec.name == command)
+        .find(|spec| spec.metadata.name == command)
         .map(|spec| spec.parser)
         .map(|parser| parser(&args[1..], context))
+}
+
+impl From<&'static ServiceCommandSpec> for RegisteredCommand<'static> {
+    fn from(spec: &'static ServiceCommandSpec) -> Self {
+        Self {
+            name: spec.name,
+            aliases: spec.aliases,
+            accepts_codex_options: spec.accepts_codex_options,
+            usage: spec.usage,
+            examples: spec.examples,
+        }
+    }
+}
+
+fn lookup_registered_command(value: &str) -> Option<RegisteredCommand<'static>> {
+    SERVICE_COMMAND_SPECS
+        .iter()
+        .find(|spec| spec.name == value || spec.aliases.contains(&value))
+        .map(RegisteredCommand::from)
+        .or_else(|| {
+            STATIC_COMMANDS
+                .iter()
+                .map(|spec| spec.metadata)
+                .find(|spec| spec.name == value || spec.aliases.contains(&value))
+        })
 }
 
 fn parse_service_command(

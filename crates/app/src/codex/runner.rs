@@ -29,6 +29,7 @@ pub fn build_command(
 ) -> Command {
     let mut command = Command::new(executable);
     command.args(base_command_args(request, inside_git_repository));
+    command.env_remove(crate::reporting::COMMAND_OUTCOME_PATH_ENV);
     discovery::configure_child_path(&mut command);
     command
 }
@@ -492,6 +493,30 @@ mod tests {
         assert_eq!(
             args,
             vec!["--output-last-message", "last.txt", "--color", "never"]
+        );
+    }
+
+    #[test]
+    fn build_command_prevents_report_outcome_env_leaking_to_codex() {
+        let request = CodexRequest::new(
+            "gpt-5.5",
+            ReasoningEffort::Low,
+            CodexMode::Exec,
+            Some("Run tests".to_string()),
+            false,
+        );
+
+        let command = build_command(PathBuf::from("codex"), &request, true);
+
+        let outcome_env = command
+            .get_envs()
+            .find(|(name, _value)| *name == crate::reporting::COMMAND_OUTCOME_PATH_ENV);
+        assert_eq!(
+            outcome_env,
+            Some((
+                std::ffi::OsStr::new(crate::reporting::COMMAND_OUTCOME_PATH_ENV),
+                None
+            ))
         );
     }
 

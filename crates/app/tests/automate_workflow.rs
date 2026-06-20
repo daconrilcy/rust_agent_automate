@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -173,21 +174,30 @@ fn run_workflow_chains_artifacts_from_structured_outcomes() {
         }"#,
     )
     .expect("workflow valide");
+    let workspace = std::env::temp_dir().join("rust_agent_workflow_chain_artifacts");
+    let audit_artifact = workspace.join(".audit").join("audit.md");
+    let plan_artifact = workspace.join(".plan").join("plan.md");
+    fs::create_dir_all(audit_artifact.parent().expect("parent audit")).expect("dossier audit");
+    fs::create_dir_all(plan_artifact.parent().expect("parent plan")).expect("dossier plan");
+    fs::write(&audit_artifact, "audit").expect("artefact audit");
+    fs::write(&plan_artifact, "plan").expect("artefact plan");
+    let audit_artifact_for_step = audit_artifact.clone();
+    let plan_artifact_for_step = plan_artifact.clone();
     let calls = Rc::new(RefCell::new(Vec::new()));
     let seen = Rc::clone(&calls);
 
     let report = run_workflow_with_executor(
         &workflow,
         "Durcir",
-        Path::new("C:\\repo"),
-        Path::new("C:\\repo"),
+        &workspace,
+        &workspace,
         move |workflow, step, context| {
             seen.borrow_mut()
                 .push(resolve_step_args(workflow, step, context));
 
             let artifact_path = match step.name.as_str() {
-                "audit" => Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
-                "plan" => Some(PathBuf::from("C:\\repo\\.plan\\plan.md")),
+                "audit" => Some(audit_artifact_for_step.clone()),
+                "plan" => Some(plan_artifact_for_step.clone()),
                 _ => None,
             };
 
@@ -215,7 +225,7 @@ fn run_workflow_chains_artifacts_from_structured_outcomes() {
         vec![
             "audit",
             "--target",
-            "C:\\repo",
+            workspace.to_str().expect("workspace utf-8"),
             "--model",
             DEFAULT_MODEL,
             "--reasoning",
@@ -225,7 +235,14 @@ fn run_workflow_chains_artifacts_from_structured_outcomes() {
         ]
     );
     assert_eq!(calls[1][0], "plan");
-    assert_eq!(calls[1][1], "C:\\repo\\.audit\\audit.md");
+    assert_eq!(
+        calls[1][1],
+        fs::canonicalize(&audit_artifact)
+            .expect("artefact canonical")
+            .display()
+            .to_string()
+    );
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
@@ -301,14 +318,18 @@ fn run_workflow_uses_structured_clean_status_for_loop_stop() {
     )
     .expect("workflow valide");
 
+    let workspace = std::env::temp_dir().join("rust_agent_workflow_loop_stop");
+    let artifact = workspace.join(".audit").join("artifact.md");
+    fs::create_dir_all(artifact.parent().expect("parent")).expect("dossier audit");
+    fs::write(&artifact, "artifact").expect("artefact audit");
     let calls = Rc::new(RefCell::new(0_u32));
     let seen = Rc::clone(&calls);
 
     let report = run_workflow_with_executor(
         &workflow,
         "Durcir",
-        Path::new("C:\\repo"),
-        Path::new("C:\\repo"),
+        &workspace,
+        &workspace,
         move |_workflow, step, _context| {
             *seen.borrow_mut() += 1;
             Ok(StepExecution {
@@ -320,7 +341,7 @@ fn run_workflow_uses_structured_clean_status_for_loop_stop() {
                     command_name: step.name.clone(),
                     status_code: Some(0),
                     final_message_present: true,
-                    artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\artifact.md")),
+                    artifact_path: Some(artifact.clone()),
                     clean: (step.name == "alignment_audit").then_some(true),
                 }),
             })
@@ -331,6 +352,7 @@ fn run_workflow_uses_structured_clean_status_for_loop_stop() {
     assert!(report.clean_stop);
     assert_eq!(report.completed_cycles, 1);
     assert_eq!(*calls.borrow(), 2);
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
@@ -345,11 +367,15 @@ fn run_workflow_rejects_loop_audit_without_structured_clean_status() {
     )
     .expect("workflow valide");
 
+    let workspace = std::env::temp_dir().join("rust_agent_workflow_missing_clean");
+    let artifact = workspace.join(".audit").join("artifact.md");
+    fs::create_dir_all(artifact.parent().expect("parent")).expect("dossier audit");
+    fs::write(&artifact, "artifact").expect("artefact audit");
     let error = run_workflow_with_executor(
         &workflow,
         "Durcir",
-        Path::new("C:\\repo"),
-        Path::new("C:\\repo"),
+        &workspace,
+        &workspace,
         move |_workflow, step, _context| {
             Ok(StepExecution {
                 status_code: Some(0),
@@ -360,7 +386,7 @@ fn run_workflow_rejects_loop_audit_without_structured_clean_status() {
                     command_name: step.name.clone(),
                     status_code: Some(0),
                     final_message_present: true,
-                    artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\artifact.md")),
+                    artifact_path: Some(artifact.clone()),
                     clean: None,
                 }),
             })
@@ -369,4 +395,5 @@ fn run_workflow_rejects_loop_audit_without_structured_clean_status() {
     .expect_err("loop_policy doit exiger un statut clean structure");
 
     assert!(error.to_string().contains("statut clean"));
+    let _ = fs::remove_dir_all(workspace);
 }

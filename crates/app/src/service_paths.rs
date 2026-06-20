@@ -108,7 +108,11 @@ pub fn resolve_output_dir(
     context: &ExecutionContext,
     default_dir_name: &str,
 ) -> PathBuf {
-    output_dir.unwrap_or_else(|| context.output_root().join(default_dir_name))
+    match output_dir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => context.output_root().join(path),
+        None => context.output_root().join(default_dir_name),
+    }
 }
 
 fn canonicalize_workspace_root(path: PathBuf) -> Result<PathBuf, String> {
@@ -206,6 +210,18 @@ mod tests {
         let output_dir = resolve_output_dir(Some(explicit.clone()), &context, ".audit");
 
         assert_eq!(output_dir, explicit);
+    }
+
+    #[test]
+    fn resolve_output_dir_resolves_relative_explicit_value_from_output_root() {
+        let context = ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"))
+            .with_output_root(PathBuf::from("C:\\dev\\rust_agent\\crates\\app"));
+        let output_dir = resolve_output_dir(Some(PathBuf::from(".audit")), &context, ".plan");
+
+        assert_eq!(
+            output_dir,
+            Path::new("C:\\dev\\rust_agent\\crates\\app").join(".audit")
+        );
     }
 
     #[test]

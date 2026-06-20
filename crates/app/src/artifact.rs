@@ -11,6 +11,7 @@ pub fn save_timestamped_markdown(
     content: &str,
 ) -> io::Result<PathBuf> {
     fs::create_dir_all(output_dir)?;
+    let output_dir = fs::canonicalize(output_dir)?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -18,7 +19,7 @@ pub fn save_timestamped_markdown(
         .unwrap_or_default();
 
     for attempt in 0..1000 {
-        let path = artifact_path(output_dir, prefix, timestamp, attempt);
+        let path = artifact_path(&output_dir, prefix, timestamp, attempt);
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
                 if let Err(error) = file.write_all(content.as_bytes()) {

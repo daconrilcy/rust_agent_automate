@@ -44,6 +44,7 @@ pub fn run_step(
     let mut command = Command::new(current_exe);
     let outcome_path = temp_outcome_file_path();
     command
+        .current_dir(child_current_dir(context))
         .args(crate::automate::step_args::resolve_step_args(
             workflow, step, context,
         ))
@@ -160,6 +161,10 @@ fn cargo_target_dir_for_context(context: &RunContext, process_id: u32) -> PathBu
         .join(format!(".cargo-target-loop-{process_id}"))
 }
 
+fn child_current_dir(context: &RunContext) -> &Path {
+    &context.workspace_root
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -188,6 +193,19 @@ mod tests {
         assert_eq!(
             path,
             Path::new("C:\\dev\\rust_agent\\.cargo-target-loop-1234")
+        );
+    }
+
+    #[test]
+    fn run_step_workspace_root_is_used_as_child_current_dir() {
+        let context = RunContext {
+            workspace_root: PathBuf::from("C:\\dev\\rust_agent\\workspace"),
+            ..RunContext::default()
+        };
+
+        assert_eq!(
+            child_current_dir(&context),
+            Path::new("C:\\dev\\rust_agent\\workspace")
         );
     }
 }

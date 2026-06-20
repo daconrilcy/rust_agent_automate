@@ -30,13 +30,20 @@ fn main() {
             .ok()
             .and_then(|path| path.into_os_string().into_string().ok())
             .unwrap_or_default();
+        let cwd = env::current_dir()
+            .ok()
+            .and_then(|path| path.into_os_string().into_string().ok())
+            .unwrap_or_default();
         let line = if args.is_empty() { String::new() } else { args.join(" ") };
         let _ = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_path)
             .and_then(|mut file| {
-                std::io::Write::write_all(&mut file, format!("{exe} {line}\n").as_bytes())
+                std::io::Write::write_all(
+                    &mut file,
+                    format!("cwd={cwd} exe={exe} args={line}\n").as_bytes(),
+                )
             });
     }
 

@@ -35,6 +35,8 @@ fn workflow_chain_persists_and_reuses_artifacts() {
     let mut command = common::build_command();
     command
         .current_dir(&workspace)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
         .env(
             "PATH",
             common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
@@ -78,6 +80,7 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     let workflow_path = runner_dir.join("workflow.json");
     fs::create_dir_all(&runner_dir).expect("creation du dossier runner");
     fs::create_dir_all(&workspace).expect("creation du dossier workspace");
+    fs::create_dir(runner_dir.join(".git")).expect("creation du faux depot de lancement");
 
     let workflow = r#"{
       "defaults": {
@@ -103,6 +106,8 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     let mut command = common::build_command();
     command
         .current_dir(&runner_dir)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
         .env(
             "PATH",
             common::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
@@ -136,6 +141,16 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     assert!(
         !runner_dir.join(".audit").exists(),
         "le cwd de lancement ne doit pas recevoir les artefacts"
+    );
+
+    let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
+    assert!(
+        logged.contains(&format!("cwd={}", workspace.display())),
+        "les appels codex enfants doivent s'executer depuis le workspace cible"
+    );
+    assert!(
+        logged.contains("--skip-git-repo-check"),
+        "le workspace cible sans .git doit etre detecte hors depot meme si le dossier de lancement est un depot"
     );
 
     let _ = fs::remove_dir_all(runner_dir);

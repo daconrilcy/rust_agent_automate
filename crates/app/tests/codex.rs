@@ -1,6 +1,6 @@
 mod support;
 
-use app::codex::process_exit_code;
+use app::process_exit_code;
 use std::fs;
 
 #[test]

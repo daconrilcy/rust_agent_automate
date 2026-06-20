@@ -3,8 +3,8 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
+use app::CodexMode;
 use app::ReviewSubject;
-use app::codex::CodexMode;
 
 use support::parse;
 

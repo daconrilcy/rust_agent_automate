@@ -1,10 +1,6 @@
-#[path = "codex/discovery.rs"]
 mod discovery;
-#[path = "codex/repo.rs"]
 mod repo;
-#[path = "codex/request.rs"]
 mod request;
-#[path = "codex/runner.rs"]
 mod runner;
 
 use std::io;

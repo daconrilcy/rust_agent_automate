@@ -1,6 +1,6 @@
 use std::process;
 
-use app::codex::process_exit_code;
+use app::process_exit_code;
 use app::{ParseOutcome, parse_args, print_help};
 
 fn main() {

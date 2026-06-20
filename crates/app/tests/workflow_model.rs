@@ -1,4 +1,4 @@
-use app::automate::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
+use app::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
 
 #[test]
 fn parses_default_refactor_workflow() {

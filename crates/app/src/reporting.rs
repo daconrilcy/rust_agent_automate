@@ -1,8 +1,5 @@
-#[path = "reporting/finalize.rs"]
 mod finalize;
-#[path = "reporting/render.rs"]
 mod render;
-#[path = "reporting/transport.rs"]
 mod transport;
 
 pub use finalize::{

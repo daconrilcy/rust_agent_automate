@@ -6,8 +6,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::CliCommand;
-use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
-use app::service_command::{ServiceCommandKind, ServiceCommandOptions};
+use app::{
+    CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort, ServiceCommandKind,
+    ServiceCommandOptions,
+};
 use support::{command_kind, normalize_path, parse, request_for};
 
 #[test]

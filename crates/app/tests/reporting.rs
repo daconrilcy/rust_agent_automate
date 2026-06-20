@@ -1,6 +1,5 @@
-use app::codex::RunResult;
-use app::reporting::{
-    CommandOutcome, ReportFailure, ReportSpec, command_failure_outcome,
+use app::{
+    CommandOutcome, ReportFailure, ReportSpec, RunResult, command_failure_outcome,
     detect_clean_implementation_audit, finalize_report, write_command_outcome,
 };
 use std::fs;

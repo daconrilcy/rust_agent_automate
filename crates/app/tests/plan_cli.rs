@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use app::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 
 use support::parse;
 

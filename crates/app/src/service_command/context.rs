@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use crate::service_paths::{self, ExecutionContext};
 
 use super::{
-    PreparedParseContext, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+    ParsedRequiredPath, PreparedParseContext, PreparedServiceCommand, ServiceCommandDescriptor,
+    ServiceCommandOptions,
 };
 
 pub(crate) struct PreparedPromptedService<T> {
@@ -83,6 +84,34 @@ where
         workspace_root,
         service,
         resolved,
+    })
+}
+
+pub(crate) fn prepare_required_path_service<T, FResolve, FPrompt>(
+    options: &ServiceCommandOptions,
+    descriptor: ServiceCommandDescriptor<'_>,
+    context: ExecutionContext,
+    parsed: ParsedRequiredPath,
+    resolve_required: FResolve,
+    build_prompt: FPrompt,
+) -> Result<PreparedPromptedService<T>, crate::cli::ParseOutcome>
+where
+    FResolve: FnOnce(
+        PathBuf,
+        Option<PathBuf>,
+        &ExecutionContext,
+    ) -> Result<T, service_paths::PathResolutionError>,
+    FPrompt: FnOnce(&PreparedParseContext, &T) -> String,
+{
+    prepare_prompted_service(options, descriptor, context, |parse_context| {
+        let resolved = resolve_required(
+            parsed.required_path,
+            parsed.optional_path,
+            &parse_context.context,
+        )
+        .map_err(|error| crate::cli::ParseOutcome::Error(error.to_string()))?;
+        let prompt = build_prompt(parse_context, &resolved);
+        Ok((resolved, prompt))
     })
 }
 

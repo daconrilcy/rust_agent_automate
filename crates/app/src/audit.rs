@@ -6,7 +6,8 @@ use std::time::Duration;
 use crate::cli::{ParseOutcome, next_value};
 use crate::prompt::{PromptSection, render_structured_prompt};
 use crate::service_command::{
-    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+    self, ParsedRequiredPath, PreparedServiceCommand, ServiceCommandDescriptor,
+    ServiceCommandOptions,
 };
 use crate::service_paths::{self, PathRequirement};
 
@@ -115,23 +116,23 @@ pub fn parse_args_for_context(
             "argument inattendu pour audit: {value}"
         ))),
     })?;
-
-    let prepared = service_command::prepare_prompted_service(
+    let prepared = service_command::prepare_required_path_service(
         &common,
         AUDIT_DESCRIPTOR,
         context.clone(),
-        |parse_context| {
-            let target_dir = resolve_target_dir(
-                target_dir.unwrap_or_else(|| parse_context.workspace_root.clone()),
-                &parse_context.context,
-            )
-            .map_err(|error| ParseOutcome::Error(error.to_string()))?;
-            let prompt = build_prompt(
+        ParsedRequiredPath {
+            required_path: target_dir.unwrap_or_else(|| context.workspace_root().to_path_buf()),
+            optional_path: None,
+        },
+        |target_dir, _unused, resolution_context| {
+            resolve_target_dir(target_dir, resolution_context)
+        },
+        |parse_context, target_dir| {
+            build_prompt(
                 &parse_context.workspace_root,
-                &target_dir,
+                target_dir,
                 &parse_context.output_dir,
-            );
-            Ok((target_dir, prompt))
+            )
         },
     )?;
 

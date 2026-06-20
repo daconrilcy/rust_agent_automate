@@ -127,24 +127,28 @@ pub fn parse_args_for_context(
             duplicate_optional_message: "le chemin d'implementation a deja ete fourni",
         },
     )?;
-    let prepared = service_command::prepare_prompted_service(
+    let prepared = service_command::prepare_required_path_service(
         &common,
         IMPLEMENTATION_AUDIT_DESCRIPTOR,
         context.clone(),
-        |parse_context| {
-            let plan_path = resolve_plan_file(plan_path, &parse_context.context)
-                .map_err(|error| ParseOutcome::Error(error.to_string()))?;
+        ParsedRequiredPath {
+            required_path: plan_path,
+            optional_path: implementation_path,
+        },
+        |plan_path, implementation_path, resolution_context| {
+            let plan_path = resolve_plan_file(plan_path, resolution_context)?;
             let implementation_path = implementation_path
-                .map(|path| resolve_implementation_path(path, &parse_context.context))
-                .transpose()
-                .map_err(|error| ParseOutcome::Error(error.to_string()))?;
-            let prompt = build_prompt(
+                .map(|path| resolve_implementation_path(path, resolution_context))
+                .transpose()?;
+            Ok((plan_path, implementation_path))
+        },
+        |parse_context, (plan_path, implementation_path)| {
+            build_prompt(
                 &parse_context.workspace_root,
-                &plan_path,
+                plan_path,
                 implementation_path.as_deref(),
                 &parse_context.output_dir,
-            );
-            Ok(((plan_path, implementation_path), prompt))
+            )
         },
     )?;
     let (plan_path, implementation_path) = prepared.resolved;

@@ -147,34 +147,6 @@ mod tests {
     }
 
     #[test]
-    fn injects_model_reasoning_and_resume_before_direct_run_prompt() {
-        let workflow = parse_workflow(
-            r#"{
-              "defaults": {"model":"gpt-x","reasoning":"high"},
-              "steps":[{"name":"commit","rust_command":["--mode","exec","Commit"],"fresh_codex_call":false}]
-            }"#,
-        )
-        .expect("workflow valide");
-        let context = RunContext::default();
-
-        let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
-
-        assert_eq!(
-            args,
-            vec![
-                "--model",
-                "gpt-x",
-                "--reasoning",
-                "high",
-                "--continue-codex",
-                "--mode",
-                "exec",
-                "Commit",
-            ]
-        );
-    }
-
-    #[test]
     fn keeps_nested_subcommand_args_unchanged() {
         let workflow = parse_workflow(
             r#"{

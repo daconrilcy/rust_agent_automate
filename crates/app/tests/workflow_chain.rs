@@ -3,6 +3,56 @@ mod support;
 use std::fs;
 
 #[test]
+fn workflow_chain_injects_resume_flags_for_direct_runs() {
+    let workspace = support::temp_dir("workflow_chain_direct_run");
+    let codex_bin = support::create_fake_codex_bin(&workspace);
+    let log_path = workspace.join("codex.log");
+    let workflow_path = workspace.join("workflow.json");
+
+    let workflow = r#"{
+      "defaults": {
+        "model": "gpt-x",
+        "reasoning": "high"
+      },
+      "steps": [
+        {
+          "name": "commit",
+          "rust_command": ["--mode", "exec", "Commit"],
+          "fresh_codex_call": false
+        }
+      ]
+    }"#;
+    fs::write(&workflow_path, workflow).expect("ecriture du workflow");
+
+    let mut command = support::build_command();
+    command
+        .current_dir(&workspace)
+        .env_remove("RUST_AGENT_WORKSPACE_ROOT")
+        .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
+        .env(
+            "PATH",
+            support::join_path_dirs([codex_bin.parent().expect("bin parent").to_path_buf()]),
+        )
+        .env("USERPROFILE", &workspace)
+        .env("FAKE_CODEX_LOG", &log_path)
+        .args([
+            "automate",
+            workflow_path.to_str().expect("workflow path utf-8"),
+            "Initial prompt",
+        ]);
+
+    let output = command.output().expect("execution de l'automate");
+    assert!(output.status.success(), "sortie inattendue: {:?}", output);
+
+    let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
+    assert!(logged.contains("exec resume --last"));
+    assert!(logged.contains("gpt-x"));
+    assert!(logged.contains("high"));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn workflow_chain_persists_and_reuses_artifacts() {
     let workspace = support::temp_dir("workflow_chain");
     let codex_bin = support::create_fake_codex_bin(&workspace);

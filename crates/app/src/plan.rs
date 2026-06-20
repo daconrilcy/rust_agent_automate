@@ -121,27 +121,26 @@ pub fn parse_args_for_context(
         }
     })?;
 
-    let prepared = service_command::prepare_prompted_service(
+    let prepared = service_command::prepare_required_path_service(
         &common,
         PLAN_DESCRIPTOR,
         context.clone(),
-        |parse_context| {
-            let audit_path = resolve_audit_file(
-                audit_path.ok_or_else(|| {
-                    ParseOutcome::Error(
-                        "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
-                            .to_string(),
-                    )
-                })?,
-                &parse_context.context,
-            )
-            .map_err(|error| ParseOutcome::Error(error.to_string()))?;
-            let prompt = build_prompt(
+        service_command::ParsedRequiredPath {
+            required_path: audit_path.ok_or_else(|| {
+                ParseOutcome::Error(
+                    "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
+                        .to_string(),
+                )
+            })?,
+            optional_path: None,
+        },
+        |audit_path, _unused, resolution_context| resolve_audit_file(audit_path, resolution_context),
+        |parse_context, audit_path| {
+            build_prompt(
                 &parse_context.workspace_root,
-                &audit_path,
+                audit_path,
                 &parse_context.output_dir,
-            );
-            Ok((audit_path, prompt))
+            )
         },
     )?;
 

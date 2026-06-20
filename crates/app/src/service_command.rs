@@ -14,7 +14,8 @@ pub use args::{
 #[allow(unused_imports)]
 pub(crate) use context::{
     PreparedPromptedService, prepare_parse_context_for_context, prepare_prompted_service,
-    prepare_service_command, prepare_service_from_prompt, resolve_context,
+    prepare_required_path_service, prepare_service_command, prepare_service_from_prompt,
+    resolve_context,
 };
 pub use dispatch::ServiceCommandDispatch;
 pub use exec::{execute_service_command, execute_service_command_silently, save_markdown_artifact};

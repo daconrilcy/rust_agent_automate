@@ -8,6 +8,7 @@ mod implementation_audit;
 mod plan;
 mod reporting;
 mod review;
+mod service_command;
 mod service_paths;
 
 use std::env;
@@ -188,6 +189,7 @@ fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome>
         )
     })?;
     let workflow = automate::load_workflow(&workflow_path).map_err(ParseOutcome::Error)?;
+    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
     let initial_prompt = if prompt_parts.is_empty() {
         String::from("Executer le workflow automate fourni.")
     } else {
@@ -195,6 +197,7 @@ fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome>
     };
 
     Ok(AutomateCommand {
+        workspace_root,
         workflow_path,
         workflow,
         initial_prompt,
@@ -234,10 +237,9 @@ fn parse_refactor_automate_args(args: &[String]) -> Result<RefactorAutomateComma
         Some(path) => automate::load_workflow(&path).map_err(ParseOutcome::Error)?,
         None => automate::default_refactor_workflow(),
     };
-    let workspace_root = env::current_dir().map_err(|error| {
-        ParseOutcome::Error(format!("impossible de lire le repertoire courant: {error}"))
-    })?;
-    let target_dir = automate::resolve_target_dir(target_dir.unwrap_or(workspace_root))
+    let context = service_paths::current_execution_context().map_err(ParseOutcome::Error)?;
+    let workspace_root = context.workspace_root().to_path_buf();
+    let target_dir = automate::resolve_target_dir(target_dir.unwrap_or(workspace_root.clone()), &context)
         .map_err(ParseOutcome::Error)?;
     let initial_prompt = if prompt_parts.is_empty() {
         format!(
@@ -249,6 +251,7 @@ fn parse_refactor_automate_args(args: &[String]) -> Result<RefactorAutomateComma
     };
 
     Ok(RefactorAutomateCommand {
+        workspace_root: target_dir.clone(),
         workflow,
         initial_prompt,
         target_dir,
@@ -313,20 +316,17 @@ fn run_request(request: &CodexRequest) {
 }
 
 fn run_automate(command: &AutomateCommand) {
-    let target_dir = match env::current_dir() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("impossible de lire le repertoire courant: {error}");
-            process::exit(1);
-        }
-    };
-
     eprintln!(
         "Automate Codex depuis {} sur {}...",
         command.workflow_path.display(),
-        target_dir.display()
+        command.workspace_root.display()
     );
-    run_automate_workflow(&command.workflow, &command.initial_prompt, &target_dir);
+    run_automate_workflow(
+        &command.workflow,
+        &command.initial_prompt,
+        &command.workspace_root,
+        &command.workspace_root,
+    );
 }
 
 fn run_refactor_automate(command: &RefactorAutomateCommand) {
@@ -337,12 +337,18 @@ fn run_refactor_automate(command: &RefactorAutomateCommand) {
     run_automate_workflow(
         &command.workflow,
         &command.initial_prompt,
+        &command.workspace_root,
         &command.target_dir,
     );
 }
 
-fn run_automate_workflow(workflow: &automate::Workflow, initial_prompt: &str, target_dir: &Path) {
-    match automate::run_workflow(workflow, initial_prompt, target_dir) {
+fn run_automate_workflow(
+    workflow: &automate::Workflow,
+    initial_prompt: &str,
+    workspace_root: &Path,
+    target_dir: &Path,
+) {
+    match automate::run_workflow(workflow, initial_prompt, workspace_root, target_dir) {
         Ok(report) => {
             println!(
                 "Automate termine apres {} cycle(s){}.",

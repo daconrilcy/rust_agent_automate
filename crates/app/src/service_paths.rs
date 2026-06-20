@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const WORKSPACE_ROOT_ENV: &str = "RUST_AGENT_WORKSPACE_ROOT";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathRequirement {
     File,
@@ -8,18 +10,38 @@ pub enum PathRequirement {
     FileOrDirectory,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionContext {
+    workspace_root: PathBuf,
+    target_root: Option<PathBuf>,
+    output_root: PathBuf,
+}
+
+impl ExecutionContext {
+    pub fn from_workspace_root(workspace_root: PathBuf) -> Self {
+        Self {
+            output_root: workspace_root.clone(),
+            workspace_root,
+            target_root: None,
+        }
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    pub fn output_root(&self) -> &Path {
+        &self.output_root
+    }
+}
+
 pub fn resolve_existing_path(
     path: PathBuf,
     label: &str,
     requirement: PathRequirement,
+    context: &ExecutionContext,
 ) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))?
-            .join(path)
-    };
+    let path = if path.is_absolute() { path } else { context.workspace_root().join(path) };
 
     let metadata = fs::metadata(&path).map_err(|error| {
         format!(
@@ -59,16 +81,28 @@ pub fn resolve_existing_path(
 }
 
 pub fn current_workspace_root() -> Result<PathBuf, String> {
-    std::env::current_dir()
-        .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))
+    match std::env::var_os(WORKSPACE_ROOT_ENV) {
+        Some(path) => canonicalize_workspace_root(PathBuf::from(path)),
+        None => std::env::current_dir()
+            .map_err(|error| format!("impossible de lire le repertoire courant: {error}")),
+    }
 }
 
-pub fn resolve_output_dir(
-    output_dir: Option<PathBuf>,
-    workspace_root: &Path,
-    default_dir_name: &str,
-) -> PathBuf {
-    output_dir.unwrap_or_else(|| workspace_root.join(default_dir_name))
+pub fn current_execution_context() -> Result<ExecutionContext, String> {
+    current_workspace_root().map(ExecutionContext::from_workspace_root)
+}
+
+pub fn resolve_output_dir(output_dir: Option<PathBuf>, context: &ExecutionContext, default_dir_name: &str) -> PathBuf {
+    output_dir.unwrap_or_else(|| context.output_root().join(default_dir_name))
+}
+
+fn canonicalize_workspace_root(path: PathBuf) -> Result<PathBuf, String> {
+    fs::canonicalize(&path).map_err(|error| {
+        format!(
+            "impossible de resoudre le workspace {}: {error}",
+            path.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -87,10 +121,14 @@ mod tests {
 
     #[test]
     fn resolves_relative_file_path() {
+        let context = ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("le dossier courant doit etre lisible"),
+        );
         let path = resolve_existing_path(
             PathBuf::from("Cargo.toml"),
             "fichier",
             PathRequirement::File,
+            &context,
         )
         .expect("le fichier doit exister");
 
@@ -102,10 +140,12 @@ mod tests {
     #[test]
     fn resolves_verbatim_directory_path() {
         let current_dir = std::env::current_dir().expect("le dossier courant doit etre lisible");
+        let context = ExecutionContext::from_workspace_root(current_dir.clone());
         let path = resolve_existing_path(
             verbatim_path(&current_dir),
             "dossier",
             PathRequirement::Directory,
+            &context,
         )
         .expect("le dossier verbatim doit etre accepte");
 
@@ -116,10 +156,14 @@ mod tests {
     #[test]
     fn resolves_verbatim_file_path() {
         let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let context = ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("le dossier courant doit etre lisible"),
+        );
         let path = resolve_existing_path(
             verbatim_path(&manifest_path),
             "fichier",
             PathRequirement::File,
+            &context,
         )
         .expect("le fichier verbatim doit etre accepte");
 
@@ -129,18 +173,36 @@ mod tests {
 
     #[test]
     fn resolve_output_dir_uses_default_dir_name() {
-        let workspace_root = Path::new("C:\\dev\\rust_agent");
-        let output_dir = resolve_output_dir(None, workspace_root, ".audit");
+        let context =
+            ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
+        let output_dir = resolve_output_dir(None, &context, ".audit");
 
-        assert_eq!(output_dir, workspace_root.join(".audit"));
+        assert_eq!(output_dir, context.workspace_root().join(".audit"));
     }
 
     #[test]
     fn resolve_output_dir_keeps_explicit_value() {
-        let workspace_root = Path::new("C:\\dev\\rust_agent");
+        let context =
+            ExecutionContext::from_workspace_root(PathBuf::from("C:\\dev\\rust_agent"));
         let explicit = PathBuf::from("C:\\tmp\\custom");
-        let output_dir = resolve_output_dir(Some(explicit.clone()), workspace_root, ".audit");
+        let output_dir = resolve_output_dir(Some(explicit.clone()), &context, ".audit");
 
         assert_eq!(output_dir, explicit);
+    }
+
+    #[test]
+    fn resolves_relative_file_path_from_explicit_workspace_root() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let context = ExecutionContext::from_workspace_root(workspace_root.clone());
+
+        let path = resolve_existing_path(
+            PathBuf::from("Cargo.toml"),
+            "fichier",
+            PathRequirement::File,
+            &context,
+        )
+        .expect("le fichier relatif doit etre resolu depuis le workspace explicite");
+
+        assert_eq!(path, fs::canonicalize(workspace_root.join("Cargo.toml")).expect("canonical path"));
     }
 }

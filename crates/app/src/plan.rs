@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use crate::reporting::{self, ReportSpec};
+use crate::codex::CodexRequest;
+use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value, parse_timeout};
+use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlanCommand {
@@ -17,8 +17,11 @@ pub struct PlanCommand {
     pub timeout: Duration,
 }
 
-pub fn resolve_audit_file(path: PathBuf) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "audit", PathRequirement::File)
+pub fn resolve_audit_file(
+    path: PathBuf,
+    context: &service_paths::ExecutionContext,
+) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "audit", PathRequirement::File, &context)
         .map_err(|error| error.replace("le chemin audit", "le chemin d'audit"))
 }
 
@@ -45,16 +48,15 @@ pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 }
 
 pub fn run(command: &PlanCommand) {
-    eprintln!(
-        "Plan Codex en cours depuis {} (timeout: {} secondes)...",
-        command.audit_path.display(),
-        command.timeout.as_secs()
-    );
-
-    reporting::run_codex_report(
+    service_command::run_service_command(
         &command.request,
         command.timeout,
-        ReportSpec {
+        ServiceRunSpec {
+            intro: format!(
+                "Plan Codex en cours depuis {} (timeout: {} secondes)...",
+                command.audit_path.display(),
+                command.timeout.as_secs()
+            ),
             command_name: "plan",
             saved_label: "plan",
             final_label: "plan",
@@ -67,28 +69,17 @@ pub fn run(command: &PlanCommand) {
 }
 
 pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
+    let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut audit_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
 
     let mut index = 0;
     while index < args.len() {
+        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
+            index += consumed;
+            continue;
+        }
+
         match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
             "--audit" => {
                 let value = next_value(args, index, "--audit")?;
                 if audit_path.is_some() {
@@ -98,24 +89,6 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
                 }
                 audit_path = Some(PathBuf::from(value));
                 index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
             }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
@@ -132,30 +105,24 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         }
     }
 
-    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let workspace_root = context.workspace_root().to_path_buf();
     let audit_path = resolve_audit_file(audit_path.ok_or_else(|| {
         ParseOutcome::Error(
             "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
                 .to_string(),
         )
-    })?)
+    })?, &context)
     .map_err(ParseOutcome::Error)?;
-    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".plan");
+    let output_dir = service_command::resolve_output_dir(&common, &context, ".plan");
     let prompt = build_prompt(&workspace_root, &audit_path, &output_dir);
 
     Ok(PlanCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
+        request: common.build_request(prompt),
         workspace_root,
         audit_path,
         output_dir,
-        timeout,
+        timeout: common.timeout,
     })
 }
 
@@ -183,8 +150,11 @@ mod tests {
 
     #[test]
     fn resolve_audit_file_rejects_directory() {
-        let error =
-            resolve_audit_file(std::env::temp_dir()).expect_err("un audit doit etre un fichier");
+        let context = service_paths::ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("cwd"),
+        );
+        let error = resolve_audit_file(std::env::temp_dir(), &context)
+            .expect_err("un audit doit etre un fichier");
 
         assert!(error.contains("le chemin d'audit doit etre un fichier"));
     }

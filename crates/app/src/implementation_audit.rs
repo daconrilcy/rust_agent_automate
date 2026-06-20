@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use crate::reporting::{self, ReportSpec};
+use crate::codex::CodexRequest;
+use crate::reporting;
+use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value, parse_timeout};
+use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ImplementationAuditCommand {
@@ -18,12 +19,18 @@ pub struct ImplementationAuditCommand {
     pub timeout: Duration,
 }
 
-pub fn resolve_plan_file(path: PathBuf) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "plan d'implementation", PathRequirement::File)
+pub fn resolve_plan_file(
+    path: PathBuf,
+    context: &service_paths::ExecutionContext,
+) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "plan d'implementation", PathRequirement::File, &context)
 }
 
-pub fn resolve_implementation_path(path: PathBuf) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "implementation", PathRequirement::FileOrDirectory)
+pub fn resolve_implementation_path(
+    path: PathBuf,
+    context: &service_paths::ExecutionContext,
+) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "implementation", PathRequirement::FileOrDirectory, &context)
 }
 
 pub fn build_prompt(
@@ -73,17 +80,16 @@ pub fn run(command: &ImplementationAuditCommand) {
         |path| path.display().to_string(),
     );
 
-    eprintln!(
-        "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
-        command.plan_path.display(),
-        scope,
-        command.timeout.as_secs()
-    );
-
-    reporting::run_codex_report(
+    service_command::run_service_command(
         &command.request,
         command.timeout,
-        ReportSpec {
+        ServiceRunSpec {
+            intro: format!(
+                "Audit d'implementation Codex en cours depuis {} sur {} (timeout: {} secondes)...",
+                command.plan_path.display(),
+                scope,
+                command.timeout.as_secs()
+            ),
             command_name: "implementation-audit",
             saved_label: "audit d'implementation",
             final_label: "audit d'implementation",
@@ -96,29 +102,18 @@ pub fn run(command: &ImplementationAuditCommand) {
 }
 
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
+    let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut plan_path: Option<PathBuf> = None;
     let mut implementation_path: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
 
     let mut index = 0;
     while index < args.len() {
+        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
+            index += consumed;
+            continue;
+        }
+
         match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
             "--plan" => {
                 let value = next_value(args, index, "--plan")?;
                 if plan_path.is_some() {
@@ -138,24 +133,6 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
                 }
                 implementation_path = Some(PathBuf::from(value));
                 index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
             }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
@@ -178,13 +155,14 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
                 .to_string(),
         )
     })?;
-    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
-    let plan_path = resolve_plan_file(plan_path).map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let workspace_root = context.workspace_root().to_path_buf();
+    let plan_path = resolve_plan_file(plan_path, &context).map_err(ParseOutcome::Error)?;
     let implementation_path = implementation_path
-        .map(resolve_implementation_path)
+        .map(|path| resolve_implementation_path(path, &context))
         .transpose()
         .map_err(ParseOutcome::Error)?;
-    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".audit");
+    let output_dir = service_command::resolve_output_dir(&common, &context, ".audit");
     let prompt = build_prompt(
         &workspace_root,
         &plan_path,
@@ -193,19 +171,12 @@ pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOu
     );
 
     Ok(ImplementationAuditCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
+        request: common.build_request(prompt),
         workspace_root,
         plan_path,
         implementation_path,
         output_dir,
-        timeout,
+        timeout: common.timeout,
     })
 }
 
@@ -243,15 +214,21 @@ mod tests {
 
     #[test]
     fn resolve_plan_file_rejects_directory() {
-        let error =
-            resolve_plan_file(std::env::temp_dir()).expect_err("un plan doit etre un fichier");
+        let context = service_paths::ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("cwd"),
+        );
+        let error = resolve_plan_file(std::env::temp_dir(), &context)
+            .expect_err("un plan doit etre un fichier");
 
         assert!(error.contains("le chemin plan d'implementation doit etre un fichier"));
     }
 
     #[test]
     fn resolve_implementation_path_accepts_directory() {
-        let path = resolve_implementation_path(std::env::temp_dir())
+        let context = service_paths::ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("cwd"),
+        );
+        let path = resolve_implementation_path(std::env::temp_dir(), &context)
             .expect("implementation doit accepter un dossier");
 
         assert!(path.is_dir());

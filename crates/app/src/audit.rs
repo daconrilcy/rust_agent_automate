@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
-use crate::reporting::{self, ReportSpec};
+use crate::codex::CodexRequest;
+use crate::service_command::{self, ServiceCommandOptions, ServiceRunSpec};
 use crate::service_paths::{self, PathRequirement};
-use crate::{ParseOutcome, next_value, parse_timeout};
+use crate::{ParseOutcome, next_value};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuditCommand {
@@ -41,22 +41,21 @@ pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path)
     )
 }
 
-pub fn resolve_target_dir(path: PathBuf) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory)
+pub fn resolve_target_dir(path: PathBuf, context: &service_paths::ExecutionContext) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, &context)
         .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
 }
 
 pub fn run(command: &AuditCommand) {
-    eprintln!(
-        "Audit Codex en cours sur {} (timeout: {} secondes)...",
-        command.target_dir.display(),
-        command.timeout.as_secs()
-    );
-
-    reporting::run_codex_report(
+    service_command::run_service_command(
         &command.request,
         command.timeout,
-        ReportSpec {
+        ServiceRunSpec {
+            intro: format!(
+                "Audit Codex en cours sur {} (timeout: {} secondes)...",
+                command.target_dir.display(),
+                command.timeout.as_secs()
+            ),
             command_name: "audit",
             saved_label: "audit",
             final_label: "audit",
@@ -73,50 +72,21 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 }
 
 pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
-    let mut model = String::from(DEFAULT_MODEL);
-    let mut reasoning_effort = DEFAULT_REASONING_EFFORT;
-    let mut verbose = false;
-    let mut resume_last = false;
+    let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
     let mut target_dir: Option<PathBuf> = None;
-    let mut output_dir: Option<PathBuf> = None;
-    let mut timeout = Duration::from_secs(900);
 
     let mut index = 0;
     while index < args.len() {
+        if let Some(consumed) = service_command::parse_common_option(args, index, &mut common)? {
+            index += consumed;
+            continue;
+        }
+
         match args[index].as_str() {
-            "-h" | "--help" => return Err(ParseOutcome::Help),
-            "--model" => {
-                let value = next_value(args, index, "--model")?;
-                model = value.to_owned();
-                index += 2;
-            }
-            "--reasoning" => {
-                let value = next_value(args, index, "--reasoning")?;
-                reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
-                index += 2;
-            }
             "--target" => {
                 let value = next_value(args, index, "--target")?;
                 target_dir = Some(PathBuf::from(value));
                 index += 2;
-            }
-            "--output-dir" => {
-                let value = next_value(args, index, "--output-dir")?;
-                output_dir = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--timeout-seconds" => {
-                let value = next_value(args, index, "--timeout-seconds")?;
-                timeout = parse_timeout(value)?;
-                index += 2;
-            }
-            "--verbose" => {
-                verbose = true;
-                index += 1;
-            }
-            "--continue-codex" => {
-                resume_last = true;
-                index += 1;
             }
             value if value.starts_with("--") => {
                 return Err(ParseOutcome::Error(format!("option inconnue: {value}")));
@@ -129,25 +99,19 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         }
     }
 
-    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
-    let target_dir = resolve_target_dir(target_dir.unwrap_or_else(|| workspace_root.clone()))
+    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let workspace_root = context.workspace_root().to_path_buf();
+    let target_dir = resolve_target_dir(target_dir.unwrap_or_else(|| workspace_root.clone()), &context)
         .map_err(ParseOutcome::Error)?;
-    let output_dir = service_paths::resolve_output_dir(output_dir, &workspace_root, ".audit");
+    let output_dir = service_command::resolve_output_dir(&common, &context, ".audit");
     let prompt = build_prompt(&workspace_root, &target_dir, &output_dir);
 
     Ok(AuditCommand {
-        request: CodexRequest::new(
-            model,
-            reasoning_effort,
-            CodexMode::Exec,
-            Some(prompt),
-            verbose,
-        )
-        .with_resume_last(resume_last),
+        request: common.build_request(prompt),
         workspace_root,
         target_dir,
         output_dir,
-        timeout,
+        timeout: common.timeout,
     })
 }
 
@@ -157,7 +121,10 @@ mod tests {
 
     #[test]
     fn resolve_target_dir_rejects_file() {
-        let error = resolve_target_dir(PathBuf::from("Cargo.toml"))
+        let context = service_paths::ExecutionContext::from_workspace_root(
+            std::env::current_dir().expect("cwd"),
+        );
+        let error = resolve_target_dir(PathBuf::from("Cargo.toml"), &context)
             .expect_err("audit doit exiger un dossier");
 
         assert!(error.contains("le chemin cible doit etre un dossier"));

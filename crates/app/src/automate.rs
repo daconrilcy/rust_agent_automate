@@ -11,9 +11,11 @@ use serde::Deserialize;
 use crate::codex::{self, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
 use crate::command_registry;
 use crate::reporting::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome};
+use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomateCommand {
+    pub workspace_root: PathBuf,
     pub workflow_path: PathBuf,
     pub workflow: Workflow,
     pub initial_prompt: String,
@@ -21,6 +23,7 @@ pub struct AutomateCommand {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RefactorAutomateCommand {
+    pub workspace_root: PathBuf,
     pub workflow: Workflow,
     pub initial_prompt: String,
     pub target_dir: PathBuf,
@@ -95,6 +98,7 @@ pub struct StepResult {
 
 #[derive(Debug, Default)]
 struct RunContext {
+    workspace_root: PathBuf,
     initial_prompt: String,
     target_dir: PathBuf,
     current_cycle: u32,
@@ -132,45 +136,24 @@ pub fn default_refactor_workflow() -> Workflow {
         .expect("le workflow de refactoring integre est valide")
 }
 
-pub fn resolve_target_dir(path: PathBuf) -> Result<PathBuf, String> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        env::current_dir()
-            .map_err(|error| format!("impossible de lire le repertoire courant: {error}"))?
-            .join(path)
-    };
-
-    let metadata = fs::metadata(&path).map_err(|error| {
-        format!(
-            "impossible d'acceder au dossier cible {}: {error}",
-            path.display()
-        )
-    })?;
-
-    if !metadata.is_dir() {
-        return Err(format!("le dossier cible doit exister: {}", path.display()));
-    }
-
-    fs::canonicalize(&path).map_err(|error| {
-        format!(
-            "impossible de resoudre le dossier cible {}: {error}",
-            path.display()
-        )
-    })
+pub fn resolve_target_dir(path: PathBuf, context: &ExecutionContext) -> Result<PathBuf, String> {
+    service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
+        .map_err(|error| error.replace("le chemin dossier cible", "le dossier cible"))
 }
 
 pub fn run_workflow(
     workflow: &Workflow,
     initial_prompt: &str,
+    workspace_root: &Path,
     target_dir: &Path,
 ) -> io::Result<AutomateReport> {
-    run_workflow_with_executor(workflow, initial_prompt, target_dir, run_step)
+    run_workflow_with_executor(workflow, initial_prompt, workspace_root, target_dir, run_step)
 }
 
 fn run_workflow_with_executor<F>(
     workflow: &Workflow,
     initial_prompt: &str,
+    workspace_root: &Path,
     target_dir: &Path,
     mut run_step: F,
 ) -> io::Result<AutomateReport>
@@ -178,6 +161,7 @@ where
     F: FnMut(&Workflow, &WorkflowStep, &RunContext) -> io::Result<StepExecution>,
 {
     let mut context = RunContext {
+        workspace_root: workspace_root.to_path_buf(),
         initial_prompt: initial_prompt.to_string(),
         target_dir: target_dir.to_path_buf(),
         current_cycle: 1,
@@ -289,6 +273,7 @@ fn run_step(
     let outcome_path = temp_outcome_file_path();
     command
         .args(resolve_step_args(workflow, step, context))
+        .env(service_paths::WORKSPACE_ROOT_ENV, &context.workspace_root)
         .env(COMMAND_OUTCOME_PATH_ENV, &outcome_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -752,6 +737,7 @@ mod tests {
             &workflow,
             "Durcir",
             Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
             move |workflow, step, context| {
                 seen.borrow_mut()
                     .push(resolve_step_args(workflow, step, context));
@@ -810,6 +796,7 @@ mod tests {
             &workflow,
             "Durcir",
             Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
             |_workflow, _step, _context| {
                 Ok(StepExecution {
                     status_code: Some(0),
@@ -839,6 +826,7 @@ mod tests {
         let error = run_workflow_with_executor(
             &workflow,
             "Durcir",
+            Path::new("C:\\repo"),
             Path::new("C:\\repo"),
             |_workflow, _step, _context| {
                 Ok(StepExecution {
@@ -878,6 +866,7 @@ mod tests {
             &workflow,
             "Durcir",
             Path::new("C:\\repo"),
+            Path::new("C:\\repo"),
             |_workflow, _step, _context| {
                 Ok(StepExecution {
                     status_code: Some(0),
@@ -905,6 +894,7 @@ mod tests {
         let report = run_workflow_with_executor(
             &workflow,
             "Durcir",
+            Path::new("C:\\repo"),
             Path::new("C:\\repo"),
             |_workflow, _step, _context| {
                 Ok(StepExecution {
@@ -940,6 +930,7 @@ mod tests {
         let report = run_workflow_with_executor(
             &workflow,
             "Durcir",
+            Path::new("C:\\repo"),
             Path::new("C:\\repo"),
             move |_workflow, step, _context| {
                 *seen.borrow_mut() += 1;

@@ -64,7 +64,12 @@ fn main() {
     fs::write(&source_path, source).expect("ecriture du faux code source");
     let status = Command::new("rustc")
         .current_dir(&bin_dir)
-        .args(["--edition=2021", source_path.to_str().expect("source utf-8"), "-o", executable.to_str().expect("exe utf-8")])
+        .args([
+            "--edition=2021",
+            source_path.to_str().expect("source utf-8"),
+            "-o",
+            executable.to_str().expect("exe utf-8"),
+        ])
         .status()
         .expect("compilation du faux codex");
     assert!(status.success(), "rustc doit compiler le faux codex");

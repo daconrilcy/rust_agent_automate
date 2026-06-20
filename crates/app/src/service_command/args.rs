@@ -14,6 +14,41 @@ struct CommonOptionSeen {
     timeout: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceCommandParseError {
+    Help,
+    Message(String),
+}
+
+impl std::fmt::Display for ServiceCommandParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Help => f.write_str("help requested"),
+            Self::Message(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ServiceCommandParseError {}
+
+impl From<ParseOutcome> for ServiceCommandParseError {
+    fn from(value: ParseOutcome) -> Self {
+        match value {
+            ParseOutcome::Help => Self::Help,
+            ParseOutcome::Error(message) => Self::Message(message),
+        }
+    }
+}
+
+impl ServiceCommandParseError {
+    pub fn into_parse_outcome(self) -> ParseOutcome {
+        match self {
+            Self::Help => ParseOutcome::Help,
+            Self::Message(message) => ParseOutcome::Error(message),
+        }
+    }
+}
+
 fn parse_common_option(
     args: &[String],
     index: usize,
@@ -122,47 +157,78 @@ pub fn parse_subject_and_artifact<T, F>(
     artifact_name: &str,
     command_name: &str,
     parse_subject: F,
-) -> Result<ParsedSubjectArtifact<T>, ParseOutcome>
+) -> Result<ParsedSubjectArtifact<T>, ServiceCommandParseError>
 where
-    F: Fn(&str) -> Result<T, String>,
+    F: Fn(&str) -> Result<T, ServiceCommandParseError>,
 {
     let mut subject: Option<T> = None;
     let mut artifact_path: Option<PathBuf> = None;
+    let mut seen = CommonOptionSeen::default();
+    let mut index = 0;
 
-    parse_with_common_options(args, options, |index, value| match value {
-        value if value == subject_name => {
-            let value = next_value(args, index, subject_name)?;
-            if subject.is_some() {
-                return Err(duplicate_argument(command_name, "le type"));
-            }
-            subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
-            Ok(2)
+    while index < args.len() {
+        if let Some(consumed) = parse_common_option(args, index, options, &mut seen)
+            .map_err(ServiceCommandParseError::from)?
+        {
+            index += consumed;
+            continue;
         }
-        value if value == artifact_name => capture_named_path(
-            &mut artifact_path,
-            args,
-            index,
-            artifact_name,
-            duplicate_argument(command_name, "l'artefact"),
-        ),
-        value if value.starts_with("--") => reject_unknown_option(value),
-        value => {
-            if subject.is_none() {
-                subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
-                Ok(1)
-            } else {
-                capture_positional_path(&mut artifact_path, command_name, value)
+
+        let value = args[index].as_str();
+        let consumed = match value {
+            value if value == subject_name => {
+                let value = next_value(args, index, subject_name)
+                    .map_err(ServiceCommandParseError::from)?;
+                if subject.is_some() {
+                    return Err(ServiceCommandParseError::from(duplicate_argument(
+                        command_name,
+                        "le type",
+                    )));
+                }
+                subject = Some(parse_subject(value)?);
+                2
             }
+            value if value == artifact_name => capture_named_path(
+                &mut artifact_path,
+                args,
+                index,
+                artifact_name,
+                duplicate_argument(command_name, "l'artefact"),
+            )
+            .map_err(ServiceCommandParseError::from)?,
+            value if value.starts_with("--") => {
+                return Err(ServiceCommandParseError::from(
+                    reject_unknown_option(value).expect_err("unknown option must error"),
+                ));
+            }
+            value => {
+                if subject.is_none() {
+                    subject = Some(parse_subject(value)?);
+                    1
+                } else {
+                    capture_positional_path(&mut artifact_path, command_name, value)
+                        .map_err(ServiceCommandParseError::from)?
+                }
+            }
+        };
+
+        if consumed == 0 {
+            return Err(ServiceCommandParseError::Message(format!(
+                "le parseur partage doit consommer au moins un argument: {}",
+                args[index]
+            )));
         }
-    })?;
+
+        index += consumed;
+    }
 
     let subject = subject.ok_or_else(|| {
-        ParseOutcome::Error(format!(
+        ServiceCommandParseError::Message(format!(
             "la commande {command_name} requiert un type: plan, audit ou implementation"
         ))
     })?;
     let artifact_path = artifact_path.ok_or_else(|| {
-        ParseOutcome::Error(format!(
+        ServiceCommandParseError::Message(format!(
             "la commande {command_name} requiert un artefact. Exemple: cargo run -p app -- {command_name} plan .plan\\plan.md"
         ))
     })?;

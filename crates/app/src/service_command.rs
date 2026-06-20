@@ -8,8 +8,8 @@ mod spec;
 
 #[allow(unused_imports)]
 pub use args::{
-    parse_required_path_with_optional_named_path, parse_subject_and_artifact,
-    parse_with_common_options,
+    ServiceCommandParseError, parse_required_path_with_optional_named_path,
+    parse_subject_and_artifact, parse_with_common_options,
 };
 #[allow(unused_imports)]
 pub(crate) use context::{

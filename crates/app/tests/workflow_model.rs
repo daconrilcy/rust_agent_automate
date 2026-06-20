@@ -33,13 +33,16 @@ fn rejects_duplicate_step_names() {
     )
     .expect_err("les noms d'etapes doivent etre uniques");
 
-    assert!(error.contains("doit etre unique"));
+    assert!(error.to_string().contains("doit etre unique"));
 }
 
 #[test]
 fn rejects_empty_workflow() {
     let error = parse_workflow(r#"{"steps":[]}"#).expect_err("workflow vide invalide");
-    assert_eq!(error, "le workflow doit definir au moins une etape");
+    assert_eq!(
+        error.to_string(),
+        "le workflow doit definir au moins une etape"
+    );
 }
 
 #[test]
@@ -63,7 +66,7 @@ fn rejects_unknown_artifact_reference_during_validation() {
     )
     .expect_err("les references d'artefact inconnues doivent etre rejetees");
 
-    assert!(error.contains("artefact inconnu"));
+    assert!(error.to_string().contains("artefact inconnu"));
 }
 
 #[test]
@@ -78,7 +81,7 @@ fn rejects_future_artifact_reference_during_validation() {
     )
     .expect_err("les references futures doivent etre rejetees");
 
-    assert!(error.contains("artefact futur"));
+    assert!(error.to_string().contains("artefact futur"));
 }
 
 #[test]
@@ -93,7 +96,7 @@ fn rejects_artifact_reference_to_direct_run_step() {
     )
     .expect_err("une etape directe ne produit pas d'artefact structure");
 
-    assert!(error.contains("execution directe"));
+    assert!(error.to_string().contains("execution directe"));
 }
 
 #[test]
@@ -108,5 +111,5 @@ fn rejects_loop_policy_on_direct_run_step_during_validation() {
     )
     .expect_err("loop_policy doit pointer vers une commande structuree");
 
-    assert!(error.contains("commande structuree"));
+    assert!(error.to_string().contains("commande structuree"));
 }

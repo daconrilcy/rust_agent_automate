@@ -6,6 +6,110 @@ use serde::Deserialize;
 
 use crate::codex::{DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
 
+#[derive(Debug)]
+pub enum WorkflowParseError {
+    ReadFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    InvalidJson {
+        message: String,
+    },
+    EmptyWorkflow,
+    EmptyStepName,
+    MissingRustCommand {
+        step_name: String,
+    },
+    DuplicateStepName {
+        step_name: String,
+    },
+    UnknownLoopAuditStep {
+        step_name: String,
+    },
+    DirectRunLoopAuditStep {
+        step_name: String,
+    },
+    UnknownArtifactReference {
+        step_name: String,
+        referenced_step: String,
+    },
+    FutureArtifactReference {
+        step_name: String,
+        referenced_step: String,
+    },
+    DirectRunArtifactReference {
+        step_name: String,
+        referenced_step: String,
+    },
+}
+
+impl std::fmt::Display for WorkflowParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadFile { path, source } => {
+                write!(
+                    f,
+                    "impossible de lire le workflow {}: {source}",
+                    path.display()
+                )
+            }
+            Self::InvalidJson { message } => write!(f, "workflow JSON invalide: {message}"),
+            Self::EmptyWorkflow => f.write_str("le workflow doit definir au moins une etape"),
+            Self::EmptyStepName => f.write_str("chaque etape doit avoir un nom non vide"),
+            Self::MissingRustCommand { step_name } => {
+                write!(f, "l'etape '{step_name}' doit definir rust_command")
+            }
+            Self::DuplicateStepName { step_name } => {
+                write!(
+                    f,
+                    "le nom d'etape '{step_name}' doit etre unique dans le workflow"
+                )
+            }
+            Self::UnknownLoopAuditStep { step_name } => {
+                write!(
+                    f,
+                    "loop_policy.audit_step '{step_name}' ne correspond a aucune etape"
+                )
+            }
+            Self::DirectRunLoopAuditStep { step_name } => {
+                write!(
+                    f,
+                    "loop_policy.audit_step '{step_name}' doit etre une commande structuree, pas une execution directe"
+                )
+            }
+            Self::UnknownArtifactReference {
+                step_name,
+                referenced_step,
+            } => {
+                write!(
+                    f,
+                    "l'etape '{step_name}' reference un artefact inconnu '{referenced_step}'"
+                )
+            }
+            Self::FutureArtifactReference {
+                step_name,
+                referenced_step,
+            } => {
+                write!(
+                    f,
+                    "l'etape '{step_name}' reference l'artefact futur '{referenced_step}' avant sa production"
+                )
+            }
+            Self::DirectRunArtifactReference {
+                step_name,
+                referenced_step,
+            } => {
+                write!(
+                    f,
+                    "l'etape '{step_name}' reference l'artefact '{referenced_step}' mais cette etape est une execution directe sans resultat structure"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for WorkflowParseError {}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomateCommand {
     pub workspace_root: PathBuf,
@@ -85,16 +189,20 @@ pub struct LoopPolicy {
     pub clean_markers: Vec<String>,
 }
 
-pub fn load_workflow(path: &Path) -> Result<Workflow, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|error| format!("impossible de lire le workflow {}: {error}", path.display()))?;
+pub fn load_workflow(path: &Path) -> Result<Workflow, WorkflowParseError> {
+    let content = fs::read_to_string(path).map_err(|source| WorkflowParseError::ReadFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     parse_workflow(&content)
 }
 
-pub fn parse_workflow(content: &str) -> Result<Workflow, String> {
-    let workflow: Workflow = serde_json::from_str(content)
-        .map_err(|error| format!("workflow JSON invalide: {error}"))?;
+pub fn parse_workflow(content: &str) -> Result<Workflow, WorkflowParseError> {
+    let workflow: Workflow =
+        serde_json::from_str(content).map_err(|error| WorkflowParseError::InvalidJson {
+            message: error.to_string(),
+        })?;
 
     validate_workflow(workflow, super::classify_step_kind)
 }
@@ -107,9 +215,9 @@ pub fn default_refactor_workflow() -> Workflow {
 fn validate_workflow(
     workflow: Workflow,
     classify_step_kind: fn(&[String]) -> WorkflowStepKind,
-) -> Result<Workflow, String> {
+) -> Result<Workflow, WorkflowParseError> {
     if workflow.steps.is_empty() {
-        return Err("le workflow doit definir au moins une etape".to_string());
+        return Err(WorkflowParseError::EmptyWorkflow);
     }
 
     let mut workflow = workflow;
@@ -118,16 +226,17 @@ fn validate_workflow(
 
     for step in &mut workflow.steps {
         if step.name.trim().is_empty() {
-            return Err("chaque etape doit avoir un nom non vide".to_string());
+            return Err(WorkflowParseError::EmptyStepName);
         }
         if step.rust_command.is_empty() {
-            return Err(format!("l'etape '{}' doit definir rust_command", step.name));
+            return Err(WorkflowParseError::MissingRustCommand {
+                step_name: step.name.clone(),
+            });
         }
         if !seen_names.insert(step.name.clone()) {
-            return Err(format!(
-                "le nom d'etape '{}' doit etre unique dans le workflow",
-                step.name
-            ));
+            return Err(WorkflowParseError::DuplicateStepName {
+                step_name: step.name.clone(),
+            });
         }
 
         step.kind = classify_step_kind(&step.rust_command);
@@ -141,24 +250,22 @@ fn validate_workflow(
             .iter()
             .find(|step| step.name == policy.audit_step)
         else {
-            return Err(format!(
-                "loop_policy.audit_step '{}' ne correspond a aucune etape",
-                policy.audit_step
-            ));
+            return Err(WorkflowParseError::UnknownLoopAuditStep {
+                step_name: policy.audit_step.clone(),
+            });
         };
 
         if matches!(audit_step.kind, WorkflowStepKind::DirectRun) {
-            return Err(format!(
-                "loop_policy.audit_step '{}' doit etre une commande structuree, pas une execution directe",
-                policy.audit_step
-            ));
+            return Err(WorkflowParseError::DirectRunLoopAuditStep {
+                step_name: policy.audit_step.clone(),
+            });
         }
     }
 
     Ok(workflow)
 }
 
-fn validate_artifact_references(workflow: &Workflow) -> Result<(), String> {
+fn validate_artifact_references(workflow: &Workflow) -> Result<(), WorkflowParseError> {
     for (index, step) in workflow.steps.iter().enumerate() {
         for referenced_step in referenced_artifacts(&step.rust_command) {
             let Some(referenced_index) = workflow
@@ -166,27 +273,27 @@ fn validate_artifact_references(workflow: &Workflow) -> Result<(), String> {
                 .iter()
                 .position(|candidate| candidate.name == referenced_step)
             else {
-                return Err(format!(
-                    "l'etape '{}' reference un artefact inconnu '{}'",
-                    step.name, referenced_step
-                ));
+                return Err(WorkflowParseError::UnknownArtifactReference {
+                    step_name: step.name.clone(),
+                    referenced_step: referenced_step.to_string(),
+                });
             };
 
             if referenced_index >= index {
-                return Err(format!(
-                    "l'etape '{}' reference l'artefact futur '{}' avant sa production",
-                    step.name, referenced_step
-                ));
+                return Err(WorkflowParseError::FutureArtifactReference {
+                    step_name: step.name.clone(),
+                    referenced_step: referenced_step.to_string(),
+                });
             }
 
             if matches!(
                 workflow.steps[referenced_index].kind,
                 WorkflowStepKind::DirectRun
             ) {
-                return Err(format!(
-                    "l'etape '{}' reference l'artefact '{}' mais cette etape est une execution directe sans resultat structure",
-                    step.name, referenced_step
-                ));
+                return Err(WorkflowParseError::DirectRunArtifactReference {
+                    step_name: step.name.clone(),
+                    referenced_step: referenced_step.to_string(),
+                });
             }
         }
     }

@@ -89,7 +89,8 @@ pub fn parse_args_for_context(
         "--artifact",
         "fix-loop",
         parse_input_kind,
-    )?;
+    )
+    .map_err(service_command::ServiceCommandParseError::into_parse_outcome)?;
     let prepared = service_command::prepare_prompted_service(
         &common,
         FIX_LOOP_DESCRIPTOR,
@@ -116,10 +117,12 @@ pub fn parse_args_for_context(
     })
 }
 
-fn parse_input_kind(value: &str) -> Result<ReviewSubject, String> {
+fn parse_input_kind(
+    value: &str,
+) -> Result<ReviewSubject, service_command::ServiceCommandParseError> {
     value.parse::<ReviewSubject>().map_err(|_| {
-        format!(
+        service_command::ServiceCommandParseError::Message(format!(
             "type d'entree fix-loop invalide: {value}. Valeurs attendues: plan, audit, implementation"
-        )
+        ))
     })
 }

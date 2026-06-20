@@ -130,12 +130,32 @@ impl std::fmt::Display for AutomationError {
 
 impl std::error::Error for AutomationError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetDirResolutionError {
+    message: String,
+}
+
+impl TargetDirResolutionError {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl std::fmt::Display for TargetDirResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TargetDirResolutionError {}
+
 #[allow(unused_imports)]
 pub use step_outcome::{AutomateReport, StepResult};
 #[allow(unused_imports)]
 pub use workflow_model::{
-    AutomateCommand, LoopPolicy, RefactorAutomateCommand, Workflow, WorkflowDefaults, WorkflowStep,
-    WorkflowStepKind, default_refactor_workflow, load_workflow, parse_workflow,
+    AutomateCommand, LoopPolicy, RefactorAutomateCommand, Workflow, WorkflowDefaults,
+    WorkflowParseError, WorkflowStep, WorkflowStepKind, default_refactor_workflow, load_workflow,
+    parse_workflow,
 };
 #[allow(unused_imports)]
 pub use workflow_runner::run_workflow;
@@ -154,12 +174,17 @@ pub(crate) fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
     }
 }
 
-pub fn resolve_target_dir(path: PathBuf, context: &ExecutionContext) -> Result<PathBuf, String> {
+pub fn resolve_target_dir(
+    path: PathBuf,
+    context: &ExecutionContext,
+) -> Result<PathBuf, TargetDirResolutionError> {
     service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
         .map_err(|error| {
-            error
-                .to_string()
-                .replace("le chemin dossier cible", "le dossier cible")
+            TargetDirResolutionError::new(
+                error
+                    .to_string()
+                    .replace("le chemin dossier cible", "le dossier cible"),
+            )
         })
 }
 
@@ -169,7 +194,7 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
     let mut named_workflow = false;
 
     let prompt_start = scan_args(args, |index, value| match value {
-        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "-h" | "--help" => Err(ParseOutcome::Help),
         "--workflow" => {
             mark_seen_with_message(
                 &mut named_workflow,
@@ -207,7 +232,8 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
                 .to_string(),
         )
     })?;
-    let workflow = load_workflow(&workflow_path).map_err(ParseOutcome::Error)?;
+    let workflow =
+        load_workflow(&workflow_path).map_err(|error| ParseOutcome::Error(error.to_string()))?;
     let workspace_root = service_paths::current_workspace_root()
         .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     let initial_prompt = if prompt_parts.is_empty() {
@@ -234,7 +260,7 @@ pub fn parse_refactor_automate_args(
     let mut seen_target = false;
 
     let prompt_start = scan_args(args, |index, value| match value {
-        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "-h" | "--help" => Err(ParseOutcome::Help),
         "--workflow" => {
             mark_seen_with_message(
                 &mut seen_workflow,
@@ -264,7 +290,9 @@ pub fn parse_refactor_automate_args(
     }
 
     let workflow = match workflow_path {
-        Some(path) => load_workflow(&path).map_err(ParseOutcome::Error)?,
+        Some(path) => {
+            load_workflow(&path).map_err(|error| ParseOutcome::Error(error.to_string()))?
+        }
         None => default_refactor_workflow(),
     };
     let launch_workspace_root = service_paths::current_workspace_root()
@@ -278,7 +306,7 @@ pub fn parse_refactor_automate_args(
                         launch_workspace_root.clone(),
                     ),
                 )
-                .map_err(ParseOutcome::Error)?,
+                .map_err(|error| ParseOutcome::Error(error.to_string()))?,
             );
     let target_dir = context.output_root().to_path_buf();
     let output_root = context.output_root().to_path_buf();

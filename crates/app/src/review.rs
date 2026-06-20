@@ -94,8 +94,13 @@ pub fn parse_args_for_context(
         "--type",
         "--artifact",
         "review",
-        |value| value.parse(),
-    )?;
+        |value| {
+            value
+                .parse()
+                .map_err(service_command::ServiceCommandParseError::Message)
+        },
+    )
+    .map_err(service_command::ServiceCommandParseError::into_parse_outcome)?;
     let prepared = service_command::prepare_prompted_service(
         &common,
         REVIEW_DESCRIPTOR,

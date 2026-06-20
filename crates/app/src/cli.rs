@@ -137,7 +137,7 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let mut prompt_parts: Vec<String> = Vec::new();
 
     let prompt_start = scan_args(args, |index, value| match value {
-        "-h" | "--help" => return Err(ParseOutcome::Help),
+        "-h" | "--help" => Err(ParseOutcome::Help),
         "--model" => {
             mark_seen(&mut seen_model, "--model")?;
             let value = next_value(args, index, "--model")?;

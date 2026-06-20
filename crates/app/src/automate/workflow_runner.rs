@@ -85,8 +85,7 @@ where
                     step,
                     &output,
                     report.step_results.last().expect("step result"),
-                )
-                .into());
+                ));
             }
         }
         report.completed_cycles = cycle;

@@ -1,8 +1,12 @@
+//! Internal-first library surface for the `app` binary and its integration tests.
+//! The exported modules below are supported as crate-local seams, not as a long-term
+//! general-purpose public API contract.
+
 mod artifact;
-pub mod artifact_subject;
+mod artifact_subject;
 mod audit;
 pub mod automate;
-pub mod cli;
+mod cli;
 pub mod codex;
 mod command_registry;
 mod fix_loop;

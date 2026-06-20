@@ -56,9 +56,32 @@ pub fn build_prompt(workspace_root: &Path, target_dir: &Path, output_dir: &Path)
 pub fn resolve_target_dir(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, service_paths::PathResolutionError> {
     service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
-        .map_err(|error| error.replace("le chemin dossier cible", "le chemin cible"))
+        .map_err(|error| match error {
+            service_paths::PathResolutionError::Access { path, error, .. } => {
+                service_paths::PathResolutionError::Access {
+                    label: "cible".to_string(),
+                    path,
+                    error,
+                }
+            }
+            service_paths::PathResolutionError::WrongKind { path, expected, .. } => {
+                service_paths::PathResolutionError::WrongKind {
+                    label: "cible".to_string(),
+                    path,
+                    expected,
+                }
+            }
+            service_paths::PathResolutionError::CanonicalizePath { path, error, .. } => {
+                service_paths::PathResolutionError::CanonicalizePath {
+                    label: "cible".to_string(),
+                    path,
+                    error,
+                }
+            }
+            other => other,
+        })
 }
 
 pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
@@ -67,7 +90,8 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     parse_args_for_context(args, &context)
 }
 
@@ -101,7 +125,7 @@ pub fn parse_args_for_context(
                 target_dir.unwrap_or_else(|| parse_context.workspace_root.clone()),
                 &parse_context.context,
             )
-            .map_err(ParseOutcome::Error)?;
+            .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 &target_dir,
@@ -116,37 +140,4 @@ pub fn parse_args_for_context(
         workspace_root: prepared.workspace_root,
         target_dir: prepared.resolved,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prompt_mentions_skill_and_paths() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let target = Path::new("C:\\dev\\rust_agent\\crates\\app");
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.audit");
-
-        let prompt = build_prompt(workspace, target, output_dir);
-
-        assert!(prompt.contains("$rust-refactor-audit"));
-        assert!(prompt.contains("central Codex skill named rust-refactor-audit"));
-        assert!(prompt.contains("references/audit-rubric.md"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\crates\\app"));
-        assert!(prompt.contains("audit report will be saved by the wrapper"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.audit"));
-        assert!(prompt.contains("complete Markdown audit report only"));
-    }
-
-    #[test]
-    fn resolve_target_dir_rejects_file() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let error = resolve_target_dir(PathBuf::from("Cargo.toml"), &context)
-            .expect_err("audit doit exiger un dossier");
-
-        assert!(error.contains("le chemin cible doit etre un dossier"));
-    }
 }

@@ -48,6 +48,25 @@ $env:CARGO_TARGET_DIR='.target-verify'; cargo test --test workflow_chain
 $env:CARGO_TARGET_DIR='.target-verify'; cargo test
 ```
 
+## Note d'architecture
+
+Le crate `app` reste volontairement mono-crate pour cette passe, avec des frontieres de responsabilite explicites:
+- `cli` / interface: parsing top-level, aide et codes de sortie
+- `service_command` / application: definitions de commandes de service, options communes, preparation des prompts et dispatch
+- `automate` / application: orchestration des workflows et boucle multi-etapes
+- `codex`, `reporting`, `artifact`, `service_paths` / infra: execution externe, transport de rapports, persistance et resolution de chemins
+
+Les modules exportes par `src/lib.rs` servent d'abord au binaire et aux tests d'integration. Ils ne doivent pas etre traites comme une promesse d'API publique stable tant qu'un contrat plus strict n'est pas documente.
+
+## Politique de tests inline
+
+Les tests de scenario, CLI et workflow doivent vivre sous `crates/app/tests/`. Les `#[cfg(test)]` conserves dans `src/` sont des exceptions reservees a de petites invariantes privees, par exemple:
+- conversions de statuts ou mappages d'erreurs locaux
+- helpers de rendu de prompt ou de transport difficiles a verifier uniquement via l'API publique
+- petites verifications de parsing prive quand exposer un detail n'est pas justifie
+
+Si un test inline commence a couvrir un flux multi-etapes, un comportement CLI observable, une resolution de chemins, ou un cas d'integration Codex, il doit etre deplace vers `crates/app/tests/`.
+
 ## Workflow JSON d'automate
 
 Un workflow definit des etapes qui lancent les commandes Rust du binaire courant.

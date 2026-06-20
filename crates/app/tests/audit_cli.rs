@@ -3,11 +3,43 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::cli::CliCommand;
+use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use app::service_command::ServiceCommandDispatch;
 
 use support::{normalize_path, parse};
+
+#[test]
+fn audit_prompt_mentions_skill_and_paths() {
+    let command = parse(&["audit", "--target", "."]).expect("audit parse");
+    let CliCommand::Service(ServiceCommandDispatch::Audit(audit)) = command else {
+        panic!("la commande attendue est audit");
+    };
+    let prompt = audit
+        .service
+        .request
+        .prompt
+        .as_deref()
+        .expect("prompt audit");
+
+    assert!(prompt.contains("$rust-refactor-audit"));
+    assert!(prompt.contains("central Codex skill named rust-refactor-audit"));
+    assert!(prompt.contains("references/audit-rubric.md"));
+    assert!(prompt.contains("audit report will be saved by the wrapper"));
+    assert!(prompt.contains(".audit"));
+    assert!(prompt.contains("complete Markdown audit report only"));
+}
+
+#[test]
+fn audit_target_resolution_rejects_files() {
+    let error =
+        parse(&["audit", "--target", "Cargo.toml"]).expect_err("audit doit exiger un dossier");
+
+    let app::ParseOutcome::Error(message) = error else {
+        panic!("erreur de parse attendue");
+    };
+    assert!(message.contains("le chemin cible doit etre un dossier"));
+}
 
 #[test]
 fn audit_command_runs_end_to_end_and_executes_codex_from_the_workspace_root() {
@@ -91,7 +123,7 @@ fn rejects_zero_audit_timeout() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "timeout invalide: 0. Valeur attendue: nombre de secondes positif".to_string()
         )
     );
@@ -117,7 +149,7 @@ fn rejects_positional_argument_for_audit() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("argument inattendu pour audit: foo".to_string())
+        app::ParseOutcome::Error("argument inattendu pour audit: foo".to_string())
     );
 }
 
@@ -128,6 +160,6 @@ fn rejects_duplicate_audit_model_option() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
+        app::ParseOutcome::Error("l'option --model a deja ete fournie".to_string())
     );
 }

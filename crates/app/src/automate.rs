@@ -1,11 +1,11 @@
 #[path = "automate/artifact_resolution.rs"]
-pub mod artifact_resolution;
+mod artifact_resolution;
 #[path = "automate/loop_control.rs"]
-pub mod loop_control;
+mod loop_control;
 #[path = "automate/step_args.rs"]
-pub mod step_args;
+mod step_args;
 #[path = "automate/step_outcome.rs"]
-pub mod step_outcome;
+mod step_outcome;
 #[path = "automate/transport.rs"]
 mod transport;
 #[path = "automate/workflow_model.rs"]
@@ -18,6 +18,117 @@ use std::path::PathBuf;
 use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen_with_message, next_value, scan_args};
 use crate::command_registry;
 use crate::service_paths::{self, ExecutionContext, PathRequirement};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AutomationError {
+    UnsupportedServiceCommand {
+        command_name: String,
+    },
+    InternalParseFailure {
+        message: String,
+    },
+    MissingStructuredResult {
+        step_name: String,
+    },
+    StructuredResultDecode {
+        message: String,
+    },
+    ArtifactNormalization {
+        message: String,
+    },
+    LoopPolicyState {
+        message: String,
+    },
+    StepFailed {
+        step_name: String,
+        status_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
+}
+
+impl AutomationError {
+    pub(crate) fn unsupported_service_command(command_name: Option<&str>) -> Self {
+        Self::UnsupportedServiceCommand {
+            command_name: command_name.unwrap_or_default().to_string(),
+        }
+    }
+
+    pub(crate) fn internal_parse_failure(error: crate::cli::ParseOutcome) -> Self {
+        Self::InternalParseFailure {
+            message: format!("{error:?}"),
+        }
+    }
+
+    pub(crate) fn missing_structured_result(step_name: &str) -> Self {
+        Self::MissingStructuredResult {
+            step_name: step_name.to_string(),
+        }
+    }
+
+    pub(crate) fn structured_result_decode(error: impl Into<String>) -> Self {
+        Self::StructuredResultDecode {
+            message: error.into(),
+        }
+    }
+
+    pub(crate) fn artifact_normalization(error: impl Into<String>) -> Self {
+        Self::ArtifactNormalization {
+            message: error.into(),
+        }
+    }
+
+    pub(crate) fn loop_policy_state(error: impl Into<String>) -> Self {
+        Self::LoopPolicyState {
+            message: error.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for AutomationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedServiceCommand { command_name } => write!(
+                f,
+                "l'etape automate '{}' n'est pas une commande de service prise en charge",
+                command_name
+            ),
+            Self::InternalParseFailure { message } => {
+                write!(f, "echec du parseur interne: {message}")
+            }
+            Self::MissingStructuredResult { step_name } => write!(
+                f,
+                "l'etape automate '{}' doit produire un resultat structure",
+                step_name
+            ),
+            Self::StructuredResultDecode { message }
+            | Self::ArtifactNormalization { message }
+            | Self::LoopPolicyState { message } => f.write_str(message),
+            Self::StepFailed {
+                step_name,
+                status_code,
+                stdout,
+                stderr,
+            } => {
+                write!(
+                    f,
+                    "l'etape automate '{}' a echoue avec le statut {}",
+                    step_name,
+                    status_code.map_or_else(|| "inconnu".to_string(), |c| c.to_string())
+                )?;
+                if !stdout.trim().is_empty() {
+                    write!(f, "\nstdout:\n{}", stdout.trim())?;
+                }
+                if !stderr.trim().is_empty() {
+                    write!(f, "\nstderr:\n{}", stderr.trim())?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for AutomationError {}
 
 #[allow(unused_imports)]
 pub use step_outcome::{AutomateReport, StepResult};
@@ -45,7 +156,11 @@ pub(crate) fn classify_step_kind(rust_command: &[String]) -> WorkflowStepKind {
 
 pub fn resolve_target_dir(path: PathBuf, context: &ExecutionContext) -> Result<PathBuf, String> {
     service_paths::resolve_existing_path(path, "dossier cible", PathRequirement::Directory, context)
-        .map_err(|error| error.replace("le chemin dossier cible", "le dossier cible"))
+        .map_err(|error| {
+            error
+                .to_string()
+                .replace("le chemin dossier cible", "le dossier cible")
+        })
 }
 
 pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutcome> {
@@ -93,7 +208,8 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
         )
     })?;
     let workflow = load_workflow(&workflow_path).map_err(ParseOutcome::Error)?;
-    let workspace_root = service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
+    let workspace_root = service_paths::current_workspace_root()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     let initial_prompt = if prompt_parts.is_empty() {
         String::from("Executer le workflow automate fourni.")
     } else {
@@ -151,8 +267,8 @@ pub fn parse_refactor_automate_args(
         Some(path) => load_workflow(&path).map_err(ParseOutcome::Error)?,
         None => default_refactor_workflow(),
     };
-    let launch_workspace_root =
-        service_paths::current_workspace_root().map_err(ParseOutcome::Error)?;
+    let launch_workspace_root = service_paths::current_workspace_root()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     let context =
         service_paths::ExecutionContext::from_workspace_root(launch_workspace_root.clone())
             .with_output_root(

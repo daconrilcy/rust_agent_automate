@@ -34,7 +34,7 @@ pub fn resolve_artifact_path(
     kind: ReviewSubject,
     path: PathBuf,
     context: &crate::service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::service_paths::PathResolutionError> {
     crate::artifact_subject::resolve_artifact_path(kind, path, context)
 }
 
@@ -69,7 +69,8 @@ pub fn save_report(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     parse_args_for_context(args, &context)
 }
 
@@ -96,7 +97,7 @@ pub fn parse_args_for_context(
         |parse_context| {
             let artifact_path =
                 resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
-                    .map_err(ParseOutcome::Error)?;
+                    .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 input_kind,
@@ -121,60 +122,4 @@ fn parse_input_kind(value: &str) -> Result<ReviewSubject, String> {
             "type d'entree fix-loop invalide: {value}. Valeurs attendues: plan, audit, implementation"
         )
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn duplicate_type_keeps_fix_loop_specific_message() {
-        let error = parse_args(&[
-            "--type".to_string(),
-            "plan".to_string(),
-            "--type".to_string(),
-            "audit".to_string(),
-            "Cargo.toml".to_string(),
-        ])
-        .expect_err("double type refuse");
-
-        assert_eq!(
-            error,
-            ParseOutcome::Error("le type de fix-loop a deja ete fourni".to_string())
-        );
-    }
-
-    #[test]
-    fn prompt_mentions_loop_skill_and_input_kind() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let artifact = Path::new("C:\\dev\\rust_agent\\.plan\\plan.md");
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.fix-loop");
-
-        let prompt = build_prompt(workspace, ReviewSubject::Plan, artifact, output_dir);
-
-        assert!(prompt.contains("$rust-review-fix-loop"));
-        assert!(prompt.contains("central Codex skill named rust-review-fix-loop"));
-        assert!(prompt.contains("Input kind: plan"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
-        assert!(prompt.contains("final loop report will be saved by the wrapper"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.fix-loop"));
-        assert!(prompt.contains("rust-dev-solid"));
-        assert!(prompt.contains("adversarial-review cycles until no actionable findings remain"));
-        assert!(prompt.contains("complete Markdown loop report"));
-    }
-
-    #[test]
-    fn resolve_accepts_implementation_directory() {
-        let context = crate::service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let path = resolve_artifact_path(
-            ReviewSubject::Implementation,
-            std::env::temp_dir(),
-            &context,
-        )
-        .expect("implementation doit accepter un dossier");
-
-        assert!(path.is_dir());
-    }
 }

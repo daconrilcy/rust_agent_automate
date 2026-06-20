@@ -1,7 +1,7 @@
 use std::process;
 
-use app::cli::{ParseOutcome, parse_args, print_help};
 use app::codex::process_exit_code;
+use app::{ParseOutcome, parse_args, print_help};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

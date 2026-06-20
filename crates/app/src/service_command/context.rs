@@ -6,17 +6,18 @@ use super::{
     PreparedParseContext, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
 };
 
-pub struct PreparedPromptedService<T> {
+pub(crate) struct PreparedPromptedService<T> {
     pub workspace_root: PathBuf,
     pub service: PreparedServiceCommand,
     pub resolved: T,
 }
 
-pub fn resolve_context() -> Result<ExecutionContext, String> {
+pub(crate) fn resolve_context()
+-> Result<ExecutionContext, crate::service_paths::PathResolutionError> {
     service_paths::current_execution_context()
 }
 
-pub fn resolve_output_dir(
+pub(crate) fn resolve_output_dir(
     options: &ServiceCommandOptions,
     context: &ExecutionContext,
     default_dir_name: &str,
@@ -24,7 +25,7 @@ pub fn resolve_output_dir(
     service_paths::resolve_output_dir(options.output_dir.clone(), context, default_dir_name)
 }
 
-pub fn prepare_service_command(
+pub(crate) fn prepare_service_command(
     options: &ServiceCommandOptions,
     context: &ExecutionContext,
     descriptor: ServiceCommandDescriptor<'_>,
@@ -40,7 +41,7 @@ pub fn prepare_service_command(
     }
 }
 
-pub fn prepare_parse_context_for_context(
+pub(crate) fn prepare_parse_context_for_context(
     options: &ServiceCommandOptions,
     descriptor: ServiceCommandDescriptor<'_>,
     context: ExecutionContext,
@@ -55,7 +56,7 @@ pub fn prepare_parse_context_for_context(
     }
 }
 
-pub fn prepare_service_from_prompt(
+pub(crate) fn prepare_service_from_prompt(
     options: &ServiceCommandOptions,
     parse_context: &PreparedParseContext,
     descriptor: ServiceCommandDescriptor<'_>,
@@ -64,7 +65,7 @@ pub fn prepare_service_from_prompt(
     prepare_service_command(options, &parse_context.context, descriptor, prompt)
 }
 
-pub fn prepare_prompted_service<T, E, F>(
+pub(crate) fn prepare_prompted_service<T, E, F>(
     options: &ServiceCommandOptions,
     descriptor: ServiceCommandDescriptor<'_>,
     context: ExecutionContext,

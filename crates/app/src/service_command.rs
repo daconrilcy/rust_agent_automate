@@ -12,7 +12,7 @@ pub use args::{
     parse_with_common_options,
 };
 #[allow(unused_imports)]
-pub use context::{
+pub(crate) use context::{
     PreparedPromptedService, prepare_parse_context_for_context, prepare_prompted_service,
     prepare_service_from_prompt, resolve_context,
 };
@@ -65,4 +65,18 @@ pub struct RequiredPathParseSpec<'a> {
     pub required_example: &'a str,
     pub duplicate_required_message: &'a str,
     pub duplicate_optional_message: &'a str,
+}
+
+pub(crate) fn dispatch_service_args_for_context(
+    args: &[String],
+    context: &ExecutionContext,
+) -> Result<Option<ServiceCommandDispatch>, crate::cli::ParseOutcome> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Ok(None);
+    };
+    let Some(kind) = ServiceCommandKind::from_name(command) else {
+        return Ok(None);
+    };
+
+    kind.parse_for_context(&args[1..], context).map(Some)
 }

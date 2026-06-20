@@ -3,11 +3,37 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::cli::CliCommand;
+use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
+
+#[test]
+fn plan_prompt_mentions_skill_and_paths() {
+    let command = parse(&["plan", "Cargo.toml"]).expect("plan parse");
+    let CliCommand::Service(ServiceCommandDispatch::Plan(plan)) = command else {
+        panic!("la commande attendue est plan");
+    };
+    let prompt = plan.service.request.prompt.as_deref().expect("prompt plan");
+
+    assert!(prompt.contains("$refactor-plan-from-audit"));
+    assert!(prompt.contains("central Codex skill named refactor-plan-from-audit"));
+    assert!(prompt.contains("references/plan-template.md"));
+    assert!(prompt.contains("Cargo.toml"));
+    assert!(prompt.contains("final plan will be saved by the wrapper"));
+    assert!(prompt.contains("complete Markdown implementation handoff plan only"));
+}
+
+#[test]
+fn plan_rejects_directory_audit_paths() {
+    let error = parse(&["plan", "."]).expect_err("un audit doit etre un fichier");
+
+    let app::ParseOutcome::Error(message) = error else {
+        panic!("erreur de parse attendue");
+    };
+    assert!(message.contains("le chemin d'audit doit etre un fichier"));
+}
 
 #[test]
 fn plan_command_runs_end_to_end_and_saves_the_expected_artifact() {
@@ -77,9 +103,7 @@ fn rejects_duplicate_plan_audit_argument() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
-            "l'audit a deja ete fourni pour la commande plan".to_string()
-        )
+        app::ParseOutcome::Error("l'audit a deja ete fourni pour la commande plan".to_string())
     );
 }
 
@@ -89,7 +113,7 @@ fn rejects_plan_without_audit_path() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
                 .to_string()
         )

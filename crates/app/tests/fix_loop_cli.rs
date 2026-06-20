@@ -3,12 +3,34 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::artifact_subject::ReviewSubject;
-use app::cli::CliCommand;
 use app::codex::CodexMode;
 use app::service_command::ServiceCommandDispatch;
+use app::{CliCommand, ReviewSubject};
 
 use support::parse;
+
+#[test]
+fn fix_loop_prompt_mentions_skill_and_input_kind() {
+    let command = parse(&["fix-loop", "plan", "Cargo.toml"]).expect("fix-loop parse");
+    let CliCommand::Service(ServiceCommandDispatch::FixLoop(fix_loop)) = command else {
+        panic!("la commande attendue est fix-loop");
+    };
+    let prompt = fix_loop
+        .service
+        .request
+        .prompt
+        .as_deref()
+        .expect("prompt fix-loop");
+
+    assert!(prompt.contains("$rust-review-fix-loop"));
+    assert!(prompt.contains("central Codex skill named rust-review-fix-loop"));
+    assert!(prompt.contains("Input kind: plan"));
+    assert!(prompt.contains("Cargo.toml"));
+    assert!(prompt.contains("final loop report will be saved by the wrapper"));
+    assert!(prompt.contains("rust-dev-solid"));
+    assert!(prompt.contains("adversarial-review cycles until no actionable findings remain"));
+    assert!(prompt.contains("complete Markdown loop report"));
+}
 
 #[test]
 fn fix_loop_command_runs_end_to_end_and_saves_the_expected_artifact() {
@@ -99,7 +121,7 @@ fn rejects_fix_loop_without_type() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande fix-loop requiert un type: plan, audit ou implementation".to_string()
         )
     );
@@ -111,7 +133,7 @@ fn rejects_fix_loop_without_artifact() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande fix-loop requiert un artefact. Exemple: cargo run -p app -- fix-loop plan .plan\\plan.md"
                 .to_string()
         )
@@ -132,7 +154,7 @@ fn rejects_duplicate_fix_loop_type_argument() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("le type de fix-loop a deja ete fourni".to_string())
+        app::ParseOutcome::Error("le type de fix-loop a deja ete fourni".to_string())
     );
 }
 
@@ -151,7 +173,7 @@ fn rejects_duplicate_fix_loop_artifact_argument() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("l'artefact de fix-loop a deja ete fourni".to_string())
+        app::ParseOutcome::Error("l'artefact de fix-loop a deja ete fourni".to_string())
     );
 }
 
@@ -161,7 +183,7 @@ fn rejects_invalid_fix_loop_input_kind_with_command_specific_error() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "type d'entree fix-loop invalide: design. Valeurs attendues: plan, audit, implementation"
                 .to_string()
         )

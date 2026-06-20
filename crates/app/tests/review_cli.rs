@@ -3,12 +3,54 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::artifact_subject::ReviewSubject;
-use app::cli::CliCommand;
 use app::codex::CodexMode;
 use app::service_command::ServiceCommandDispatch;
+use app::{CliCommand, ReviewSubject};
 
 use support::parse;
+
+#[test]
+fn review_subjects_parse_from_public_type() {
+    assert_eq!("plan".parse::<ReviewSubject>(), Ok(ReviewSubject::Plan));
+    assert_eq!("audit".parse::<ReviewSubject>(), Ok(ReviewSubject::Audit));
+    assert_eq!(
+        "implementation".parse::<ReviewSubject>(),
+        Ok(ReviewSubject::Implementation)
+    );
+    assert!("design".parse::<ReviewSubject>().is_err());
+}
+
+#[test]
+fn review_prompt_mentions_mode_and_paths() {
+    let command = parse(&["review", "plan", "Cargo.toml"]).expect("review parse");
+    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
+        panic!("la commande attendue est review");
+    };
+    let prompt = review
+        .service
+        .request
+        .prompt
+        .as_deref()
+        .expect("prompt review");
+
+    assert!(prompt.contains("$adversarial-review"));
+    assert!(prompt.contains("central Codex skill named adversarial-review"));
+    assert!(prompt.contains("Review mode: Plan review"));
+    assert!(prompt.contains("Cargo.toml"));
+    assert!(prompt.contains("final review will be saved by the wrapper"));
+    assert!(prompt.contains("complete Markdown adversarial review only"));
+    assert!(prompt.contains("output format specified by the adversarial-review skill"));
+}
+
+#[test]
+fn review_plan_requires_file_artifact() {
+    let error = parse(&["review", "plan", "."]).expect_err("plan doit exiger un fichier");
+
+    let app::ParseOutcome::Error(message) = error else {
+        panic!("erreur de parse attendue");
+    };
+    assert!(message.contains("le chemin de review plan doit etre un fichier"));
+}
 
 #[test]
 fn review_command_runs_end_to_end_and_saves_the_expected_artifact() {
@@ -100,7 +142,7 @@ fn rejects_duplicate_review_type_argument() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("le type de review a deja ete fourni".to_string())
+        app::ParseOutcome::Error("le type de review a deja ete fourni".to_string())
     );
 }
 
@@ -119,7 +161,7 @@ fn rejects_duplicate_review_artifact_argument() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error("l'artefact de review a deja ete fourni".to_string())
+        app::ParseOutcome::Error("l'artefact de review a deja ete fourni".to_string())
     );
 }
 
@@ -129,7 +171,7 @@ fn rejects_review_without_type() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande review requiert un type: plan, audit ou implementation".to_string()
         )
     );
@@ -141,7 +183,7 @@ fn rejects_review_without_artifact() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande review requiert un artefact. Exemple: cargo run -p app -- review plan .plan\\plan.md"
                 .to_string()
         )

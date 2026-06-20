@@ -3,11 +3,66 @@ mod support;
 use std::fs;
 use std::time::Duration;
 
-use app::cli::CliCommand;
+use app::CliCommand;
 use app::codex::{CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
 use app::service_command::ServiceCommandDispatch;
 
 use support::parse;
+
+#[test]
+fn implementation_audit_prompt_mentions_skill_and_default_scope() {
+    let command =
+        parse(&["implementation-audit", "Cargo.toml"]).expect("implementation-audit parse");
+    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
+        panic!("la commande attendue est implementation-audit");
+    };
+    let prompt = audit
+        .service
+        .request
+        .prompt
+        .as_deref()
+        .expect("prompt implementation-audit");
+
+    assert!(prompt.contains("$rust-implementation-plan-audit"));
+    assert!(prompt.contains("central Codex skill named rust-implementation-plan-audit"));
+    assert!(prompt.contains("Cargo.toml"));
+    assert!(prompt.contains("No explicit implementation path was provided"));
+    assert!(prompt.contains("final audit report will be saved by the wrapper"));
+    assert!(prompt.contains("complete Markdown Rust Implementation Plan Audit report only"));
+}
+
+#[test]
+fn implementation_audit_prompt_mentions_explicit_scope() {
+    let command = parse(&[
+        "implementation-audit",
+        "Cargo.toml",
+        "--implementation",
+        ".",
+    ])
+    .expect("implementation-audit scope explicite");
+    let CliCommand::Service(ServiceCommandDispatch::ImplementationAudit(audit)) = command else {
+        panic!("la commande attendue est implementation-audit");
+    };
+    let prompt = audit
+        .service
+        .request
+        .prompt
+        .as_deref()
+        .expect("prompt implementation-audit");
+
+    assert!(prompt.contains("Review the implementation evidence at"));
+    assert!(prompt.contains("C:\\dev\\rust_agent"));
+}
+
+#[test]
+fn implementation_audit_rejects_directory_plan_path() {
+    let error = parse(&["implementation-audit", "."]).expect_err("un plan doit etre un fichier");
+
+    let app::ParseOutcome::Error(message) = error else {
+        panic!("erreur de parse attendue");
+    };
+    assert!(message.contains("le chemin plan d'implementation doit etre un fichier"));
+}
 
 #[test]
 fn implementation_audit_command_runs_end_to_end_and_saves_the_expected_artifact() {
@@ -113,7 +168,7 @@ fn rejects_implementation_audit_without_plan_path() {
 
     assert_eq!(
         error,
-        app::cli::ParseOutcome::Error(
+        app::ParseOutcome::Error(
             "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
                 .to_string()
         )

@@ -30,9 +30,33 @@ pub(crate) const PLAN_DESCRIPTOR: ServiceCommandDescriptor<'static> = ServiceCom
 pub fn resolve_audit_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
-    service_paths::resolve_existing_path(path, "audit", PathRequirement::File, context)
-        .map_err(|error| error.replace("le chemin audit", "le chemin d'audit"))
+) -> Result<PathBuf, service_paths::PathResolutionError> {
+    service_paths::resolve_existing_path(path, "audit", PathRequirement::File, context).map_err(
+        |error| match error {
+            service_paths::PathResolutionError::Access { path, error, .. } => {
+                service_paths::PathResolutionError::Access {
+                    label: "d'audit".to_string(),
+                    path,
+                    error,
+                }
+            }
+            service_paths::PathResolutionError::WrongKind { path, expected, .. } => {
+                service_paths::PathResolutionError::WrongKind {
+                    label: "d'audit".to_string(),
+                    path,
+                    expected,
+                }
+            }
+            service_paths::PathResolutionError::CanonicalizePath { path, error, .. } => {
+                service_paths::PathResolutionError::CanonicalizePath {
+                    label: "d'audit".to_string(),
+                    path,
+                    error,
+                }
+            }
+            other => other,
+        },
+    )
 }
 
 pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path) -> String {
@@ -59,7 +83,8 @@ pub fn save_plan(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     parse_args_for_context(args, &context)
 }
 
@@ -110,7 +135,7 @@ pub fn parse_args_for_context(
                 })?,
                 &parse_context.context,
             )
-            .map_err(ParseOutcome::Error)?;
+            .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 &audit_path,
@@ -125,39 +150,4 @@ pub fn parse_args_for_context(
         workspace_root: prepared.workspace_root,
         audit_path: prepared.resolved,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prompt_mentions_skill_and_paths() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let audit = Path::new("C:\\dev\\rust_agent\\.audit\\audit.md");
-
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.plan");
-
-        let prompt = build_prompt(workspace, audit, output_dir);
-
-        assert!(prompt.contains("$refactor-plan-from-audit"));
-        assert!(prompt.contains("central Codex skill named refactor-plan-from-audit"));
-        assert!(prompt.contains("references/plan-template.md"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.audit\\audit.md"));
-        assert!(prompt.contains("C:\\dev\\rust_agent"));
-        assert!(prompt.contains("final plan will be saved by the wrapper"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.plan"));
-        assert!(prompt.contains("complete Markdown implementation handoff plan only"));
-    }
-
-    #[test]
-    fn resolve_audit_file_rejects_directory() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let error = resolve_audit_file(std::env::temp_dir(), &context)
-            .expect_err("un audit doit etre un fichier");
-
-        assert!(error.contains("le chemin d'audit doit etre un fichier"));
-    }
 }

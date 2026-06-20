@@ -59,23 +59,11 @@ pub fn resolve_artifact_path(
     subject: ReviewSubject,
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
-    let path = service_paths::resolve_existing_path(
+) -> Result<PathBuf, service_paths::PathResolutionError> {
+    service_paths::resolve_existing_path(
         path,
         &format!("de review {subject}"),
         subject.path_requirement(),
         context,
-    )?;
-
-    match subject {
-        ReviewSubject::Plan | ReviewSubject::Audit if !path.is_file() => Err(format!(
-            "le chemin de review {subject} doit etre un fichier: {}",
-            path.display()
-        )),
-        ReviewSubject::Implementation if !path.is_file() && !path.is_dir() => Err(format!(
-            "le chemin de review implementation doit etre un fichier ou un dossier: {}",
-            path.display()
-        )),
-        _ => Ok(path),
-    }
+    )
 }

@@ -34,6 +34,7 @@ pub fn run_workflow(
         target_dir,
         run_step,
     )
+    .map_err(io::Error::other)
 }
 
 pub fn run_workflow_with_executor<F>(
@@ -42,9 +43,13 @@ pub fn run_workflow_with_executor<F>(
     workspace_root: &Path,
     target_dir: &Path,
     mut run_step: F,
-) -> io::Result<AutomateReport>
+) -> Result<AutomateReport, super::AutomationError>
 where
-    F: FnMut(&Workflow, &WorkflowStep, &RunContext) -> io::Result<StepExecution>,
+    F: FnMut(
+        &Workflow,
+        &WorkflowStep,
+        &RunContext,
+    ) -> Result<StepExecution, super::AutomationError>,
 {
     let mut context = RunContext {
         workspace_root: workspace_root.to_path_buf(),
@@ -80,7 +85,8 @@ where
                     step,
                     &output,
                     report.step_results.last().expect("step result"),
-                ));
+                )
+                .into());
             }
         }
         report.completed_cycles = cycle;
@@ -127,23 +133,15 @@ fn append_step_result(
     });
 }
 
-fn step_failure(step: &WorkflowStep, output: &StepExecution, result: &StepResult) -> io::Error {
-    io::Error::other(format!(
-        "l'etape automate '{}' a echoue avec le statut {}{}{}",
-        step.name,
-        result
-            .status_code
-            .map_or_else(|| "inconnu".to_string(), |c| c.to_string()),
-        format_stream("stdout", &output.stdout),
-        format_stream("stderr", &output.stderr)
-    ))
-}
-
-fn format_stream(label: &str, content: &str) -> String {
-    let content = content.trim();
-    if content.is_empty() {
-        String::new()
-    } else {
-        format!("\n{label}:\n{content}")
+fn step_failure(
+    step: &WorkflowStep,
+    output: &StepExecution,
+    result: &StepResult,
+) -> super::AutomationError {
+    super::AutomationError::StepFailed {
+        step_name: step.name.clone(),
+        status_code: result.status_code,
+        stdout: output.stdout.clone(),
+        stderr: output.stderr.clone(),
     }
 }

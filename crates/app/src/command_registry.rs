@@ -1,7 +1,5 @@
 use crate::cli::{CliCommand, ParseOutcome};
-use crate::service_command::{
-    SERVICE_COMMAND_SPECS, ServiceCommandDispatch, ServiceCommandKind, ServiceCommandSpec,
-};
+use crate::service_command::{SERVICE_COMMAND_SPECS, ServiceCommandKind, ServiceCommandSpec};
 use crate::service_paths::ExecutionContext;
 
 type CommandParser = fn(&[String], Option<&ExecutionContext>) -> Result<CliCommand, ParseOutcome>;
@@ -155,63 +153,9 @@ fn parse_service_command(
         .expect("known service command");
     let context = match context {
         Some(context) => context.clone(),
-        None => crate::service_command::resolve_context().map_err(ParseOutcome::Error)?,
+        None => crate::service_command::resolve_context()
+            .map_err(|error| ParseOutcome::Error(error.to_string()))?,
     };
     let dispatch = kind.parse_for_context(&args[1..], &context)?;
     Ok(CliCommand::Service(dispatch))
-}
-
-pub fn parse_service_subcommand_for_context(
-    args: &[String],
-    context: &ExecutionContext,
-) -> Option<Result<ServiceCommandDispatch, ParseOutcome>> {
-    match parse_registered_subcommand_for_context(args, Some(context))? {
-        Ok(CliCommand::Service(command)) => Some(Ok(command)),
-        Ok(_) => None,
-        Err(error) => Some(Err(error)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recognizes_known_subcommands_and_aliases() {
-        assert!(is_known_subcommand("audit"));
-        assert!(is_known_subcommand("impl-audit"));
-        assert!(is_known_subcommand("loop"));
-        assert!(is_known_subcommand("refactor-auto"));
-        assert!(!is_known_subcommand("unknown"));
-    }
-
-    #[test]
-    fn classifies_codex_option_commands() {
-        assert!(accepts_codex_options("audit"));
-        assert!(accepts_codex_options("impl-audit"));
-        assert!(!accepts_codex_options("automate"));
-    }
-
-    #[test]
-    fn resolves_canonical_names_for_aliases() {
-        assert_eq!(canonical_name(Some("loop")), Some("fix-loop"));
-        assert_eq!(
-            canonical_name(Some("refactor-auto")),
-            Some("refactor-automate")
-        );
-        assert_eq!(canonical_name(Some("unknown")), None);
-        assert_eq!(canonical_name(None), None);
-    }
-
-    #[test]
-    fn registered_commands_expose_parsers() {
-        for spec in registered_commands() {
-            assert!(!spec.usage.is_empty(), "usage missing for {}", spec.name);
-            assert!(
-                !spec.examples.is_empty(),
-                "examples missing for {}",
-                spec.name
-            );
-        }
-    }
 }

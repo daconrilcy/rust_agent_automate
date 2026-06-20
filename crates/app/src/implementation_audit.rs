@@ -34,7 +34,7 @@ pub(crate) const IMPLEMENTATION_AUDIT_DESCRIPTOR: ServiceCommandDescriptor<'stat
 pub fn resolve_plan_file(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, service_paths::PathResolutionError> {
     service_paths::resolve_existing_path(
         path,
         "plan d'implementation",
@@ -46,7 +46,7 @@ pub fn resolve_plan_file(
 pub fn resolve_implementation_path(
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, service_paths::PathResolutionError> {
     service_paths::resolve_existing_path(
         path,
         "implementation",
@@ -101,7 +101,8 @@ pub fn save_audit(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     parse_args_for_context(args, &context)
 }
 
@@ -132,11 +133,11 @@ pub fn parse_args_for_context(
         context.clone(),
         |parse_context| {
             let plan_path = resolve_plan_file(plan_path, &parse_context.context)
-                .map_err(ParseOutcome::Error)?;
+                .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let implementation_path = implementation_path
                 .map(|path| resolve_implementation_path(path, &parse_context.context))
                 .transpose()
-                .map_err(ParseOutcome::Error)?;
+                .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 &plan_path,
@@ -154,60 +155,4 @@ pub fn parse_args_for_context(
         plan_path,
         implementation_path,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prompt_mentions_skill_plan_and_default_scope() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let plan = Path::new("C:\\dev\\rust_agent\\.plan\\plan.md");
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.audit");
-
-        let prompt = build_prompt(workspace, plan, None, output_dir);
-
-        assert!(prompt.contains("$rust-implementation-plan-audit"));
-        assert!(prompt.contains("central Codex skill named rust-implementation-plan-audit"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
-        assert!(prompt.contains("No explicit implementation path was provided"));
-        assert!(prompt.contains("final audit report will be saved by the wrapper"));
-        assert!(prompt.contains("complete Markdown Rust Implementation Plan Audit report only"));
-    }
-
-    #[test]
-    fn prompt_mentions_explicit_implementation_scope() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let plan = Path::new("C:\\dev\\rust_agent\\.plan\\plan.md");
-        let implementation = Path::new("C:\\dev\\rust_agent\\crates\\app");
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.audit");
-
-        let prompt = build_prompt(workspace, plan, Some(implementation), output_dir);
-
-        assert!(prompt.contains("Review the implementation evidence at"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\crates\\app"));
-    }
-
-    #[test]
-    fn resolve_plan_file_rejects_directory() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let error = resolve_plan_file(std::env::temp_dir(), &context)
-            .expect_err("un plan doit etre un fichier");
-
-        assert!(error.contains("le chemin plan d'implementation doit etre un fichier"));
-    }
-
-    #[test]
-    fn resolve_implementation_path_accepts_directory() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let path = resolve_implementation_path(std::env::temp_dir(), &context)
-            .expect("implementation doit accepter un dossier");
-
-        assert!(path.is_dir());
-    }
 }

@@ -54,12 +54,14 @@ pub fn run_step(
     workflow: &Workflow,
     step: &WorkflowStep,
     context: &RunContext,
-) -> io::Result<StepExecution> {
+) -> Result<StepExecution, super::AutomationError> {
     let command = build_step_command_spec(workflow, step, context);
     match step.kind {
         WorkflowStepKind::ServiceCommand => execute_service_step_in_process(&command),
         WorkflowStepKind::DirectRun | WorkflowStepKind::NestedCommand => {
-            let output = execute_step_command(&command)?;
+            let output = execute_step_command(&command).map_err(|error| {
+                super::AutomationError::structured_result_decode(error.to_string())
+            })?;
             let command_outcome = decode_command_outcome(&command.outcome_path)?;
             Ok(step_execution_from_output(output, command_outcome))
         }
@@ -100,18 +102,18 @@ fn execute_step_command(spec: &StepCommandSpec) -> io::Result<std::process::Outp
     command.output()
 }
 
-fn execute_service_step_in_process(spec: &StepCommandSpec) -> io::Result<StepExecution> {
+fn execute_service_step_in_process(
+    spec: &StepCommandSpec,
+) -> Result<StepExecution, super::AutomationError> {
     let context = ExecutionContext::from_workspace_root(spec.workspace_root.clone())
         .with_output_root(spec.current_dir.clone());
-    let dispatch =
-        crate::command_registry::parse_service_subcommand_for_context(&spec.args, &context)
-            .ok_or_else(|| {
-                io::Error::other(format!(
-                    "l'etape automate '{}' n'est pas une commande de service prise en charge",
-                    spec.args.first().cloned().unwrap_or_default()
-                ))
-            })?
-            .map_err(|error| io::Error::other(format!("echec du parseur interne: {error:?}")))?;
+    let dispatch = crate::service_command::dispatch_service_args_for_context(&spec.args, &context)
+        .map_err(super::AutomationError::internal_parse_failure)?
+        .ok_or_else(|| {
+            super::AutomationError::unsupported_service_command(
+                spec.args.first().map(String::as_str),
+            )
+        })?;
 
     match dispatch.execute_silently() {
         Ok(report) => Ok(step_execution_from_report(report)),
@@ -184,7 +186,7 @@ pub(crate) fn validate_and_normalize_outcome(
     step: &WorkflowStep,
     context: &RunContext,
     output: &StepExecution,
-) -> io::Result<StepOutcome> {
+) -> Result<StepOutcome, super::AutomationError> {
     let mut outcome = command_outcome_for_step(workflow, step, context, output)?;
     if let Some(path) = outcome.artifact_path.take() {
         outcome.artifact_path = Some(super::artifact_resolution::normalize_artifact_path(
@@ -201,7 +203,7 @@ pub(crate) fn command_outcome_for_step(
     step: &WorkflowStep,
     _context: &RunContext,
     output: &StepExecution,
-) -> io::Result<StepOutcome> {
+) -> Result<StepOutcome, super::AutomationError> {
     if let Some(outcome) = &output.command_outcome {
         let mut outcome = outcome.clone();
         outcome.status_code = normalized_status_code(outcome.status_code);
@@ -220,85 +222,7 @@ pub(crate) fn command_outcome_for_step(
         });
     }
 
-    Err(io::Error::other(format!(
-        "l'etape automate '{}' doit produire un resultat structure",
-        step.name
-    )))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cargo_target_dir_is_scoped_to_the_workspace_root() {
-        let context = RunContext {
-            workspace_root: PathBuf::from("C:\\dev\\rust_agent"),
-            ..RunContext::default()
-        };
-
-        let path = cargo_target_dir_for_context(&context, 1234);
-
-        assert_eq!(
-            path,
-            Path::new("C:\\dev\\rust_agent\\.cargo-target-loop-1234")
-        );
-    }
-
-    #[test]
-    fn run_step_workspace_root_is_used_as_child_current_dir() {
-        let context = RunContext {
-            workspace_root: PathBuf::from("C:\\dev\\rust_agent\\workspace"),
-            ..RunContext::default()
-        };
-
-        assert_eq!(
-            child_current_dir(&context),
-            Path::new("C:\\dev\\rust_agent\\workspace")
-        );
-    }
-
-    #[test]
-    fn step_execution_from_output_normalizes_status_codes() {
-        use std::os::windows::process::ExitStatusExt;
-
-        let output = std::process::Output {
-            status: std::process::ExitStatus::from_raw(0),
-            stdout: b"ok".to_vec(),
-            stderr: b"err".to_vec(),
-        };
-
-        let execution = step_execution_from_output(output, None);
-
-        assert_eq!(execution.status_code, Some(0));
-        assert!(execution.success);
-        assert_eq!(execution.stdout, "ok");
-        assert_eq!(execution.stderr, "err");
-    }
-
-    #[test]
-    fn report_failure_conversion_reuses_reporting_failure_outcome_mapping() {
-        let execution = step_execution_from_report_failure(
-            "implementation-audit",
-            ReportFailure::Save {
-                message: "rapport".to_string(),
-                clean: Some(true),
-                error: "disk full".to_string(),
-            },
-        );
-
-        assert_eq!(execution.status_code, Some(1));
-        assert!(!execution.success);
-        assert_eq!(execution.stderr, "disk full");
-        assert_eq!(
-            execution.command_outcome,
-            Some(CommandOutcome {
-                command_name: "implementation-audit".to_string(),
-                status_code: Some(1),
-                final_message_present: true,
-                artifact_path: None,
-                clean: Some(true),
-            })
-        );
-    }
+    Err(super::AutomationError::missing_structured_result(
+        &step.name,
+    ))
 }

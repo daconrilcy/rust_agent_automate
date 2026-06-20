@@ -36,7 +36,7 @@ pub fn resolve_artifact_path(
     subject: ReviewSubject,
     path: PathBuf,
     context: &service_paths::ExecutionContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, service_paths::PathResolutionError> {
     artifact_subject::resolve_artifact_path(subject, path, context)
 }
 
@@ -75,7 +75,8 @@ pub fn save_review(output_dir: &Path, content: &str) -> io::Result<PathBuf> {
 
 #[allow(dead_code)]
 pub fn parse_args(args: &[String]) -> Result<ReviewCommand, ParseOutcome> {
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
+    let context = service_command::resolve_context()
+        .map_err(|error| ParseOutcome::Error(error.to_string()))?;
     parse_args_for_context(args, &context)
 }
 
@@ -102,7 +103,7 @@ pub fn parse_args_for_context(
         |parse_context| {
             let artifact_path =
                 resolve_artifact_path(subject, artifact_path, &parse_context.context)
-                    .map_err(ParseOutcome::Error)?;
+                    .map_err(|error| ParseOutcome::Error(error.to_string()))?;
             let prompt = build_prompt(
                 &parse_context.workspace_root,
                 subject,
@@ -119,65 +120,4 @@ pub fn parse_args_for_context(
         subject,
         artifact_path: prepared.resolved,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_review_subjects() {
-        assert_eq!("plan".parse::<ReviewSubject>(), Ok(ReviewSubject::Plan));
-        assert_eq!("audit".parse::<ReviewSubject>(), Ok(ReviewSubject::Audit));
-        assert_eq!(
-            "implementation".parse::<ReviewSubject>(),
-            Ok(ReviewSubject::Implementation)
-        );
-        assert!("design".parse::<ReviewSubject>().is_err());
-    }
-
-    #[test]
-    fn prompt_mentions_skill_mode_and_paths() {
-        let workspace = Path::new("C:\\dev\\rust_agent");
-        let artifact = Path::new("C:\\dev\\rust_agent\\.plan\\plan.md");
-        let output_dir = Path::new("C:\\dev\\rust_agent\\.review");
-
-        let prompt = build_prompt(workspace, ReviewSubject::Plan, artifact, output_dir);
-
-        assert!(prompt.contains("$adversarial-review"));
-        assert!(prompt.contains("central Codex skill named adversarial-review"));
-        assert!(prompt.contains("Review mode: Plan review"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.plan\\plan.md"));
-        assert!(prompt.contains("C:\\dev\\rust_agent"));
-        assert!(prompt.contains("final review will be saved by the wrapper"));
-        assert!(prompt.contains("C:\\dev\\rust_agent\\.review"));
-        assert!(prompt.contains("complete Markdown adversarial review only"));
-        assert!(prompt.contains("output format specified by the adversarial-review skill"));
-    }
-
-    #[test]
-    fn resolve_artifact_path_rejects_directory_for_plan() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let error = resolve_artifact_path(ReviewSubject::Plan, std::env::temp_dir(), &context)
-            .expect_err("plan doit exiger un fichier");
-
-        assert!(error.contains("le chemin de review plan doit etre un fichier"));
-    }
-
-    #[test]
-    fn resolve_artifact_path_accepts_directory_for_implementation() {
-        let context = service_paths::ExecutionContext::from_workspace_root(
-            std::env::current_dir().expect("cwd"),
-        );
-        let path = resolve_artifact_path(
-            ReviewSubject::Implementation,
-            std::env::temp_dir(),
-            &context,
-        )
-        .expect("implementation doit accepter un dossier");
-
-        assert!(path.is_dir());
-    }
 }

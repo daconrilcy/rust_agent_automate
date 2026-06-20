@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use app::cli::{CliCommand, ParseOutcome, parse_args};
 use app::codex::CodexRequest;
+use app::{CliCommand, ParseOutcome, parse_args};
 
 pub fn temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!(

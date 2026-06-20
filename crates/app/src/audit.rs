@@ -94,18 +94,21 @@ pub fn parse_args(args: &[String]) -> Result<AuditCommand, ParseOutcome> {
         ))),
     })?;
 
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
-    let workspace_root = context.workspace_root().to_path_buf();
+    let parse_context = service_command::prepare_parse_context(&common, AUDIT_DESCRIPTOR)
+        .map_err(ParseOutcome::Error)?;
+    let workspace_root = parse_context.workspace_root.clone();
     let target_dir = resolve_target_dir(
         target_dir.unwrap_or_else(|| workspace_root.clone()),
-        &context,
+        &parse_context.context,
     )
     .map_err(ParseOutcome::Error)?;
-    let preview_output_dir =
-        service_command::resolve_output_dir(&common, &context, AUDIT_DESCRIPTOR.default_output_dir);
-    let prompt = build_prompt(&workspace_root, &target_dir, &preview_output_dir);
-    let service =
-        service_command::prepare_service_command(&common, &context, AUDIT_DESCRIPTOR, prompt);
+    let prompt = build_prompt(&workspace_root, &target_dir, &parse_context.output_dir);
+    let service = service_command::prepare_service_from_prompt(
+        &common,
+        &parse_context,
+        AUDIT_DESCRIPTOR,
+        prompt,
+    );
 
     Ok(AuditCommand {
         service,

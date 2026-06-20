@@ -76,6 +76,25 @@ pub struct PreparedServiceCommand {
     pub timeout: Duration,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedParseContext {
+    pub context: ExecutionContext,
+    pub workspace_root: PathBuf,
+    pub output_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSubjectArtifact<T> {
+    pub subject: T,
+    pub artifact_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRequiredPath {
+    pub required_path: PathBuf,
+    pub optional_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ServiceCommandDescriptor<'a> {
     pub default_output_dir: &'a str,
@@ -151,6 +170,134 @@ where
     Ok(())
 }
 
+pub fn parse_subject_and_artifact<T, F>(
+    args: &[String],
+    options: &mut ServiceCommandOptions,
+    subject_name: &str,
+    artifact_name: &str,
+    command_name: &str,
+    parse_subject: F,
+) -> Result<ParsedSubjectArtifact<T>, ParseOutcome>
+where
+    F: Fn(&str) -> Result<T, String>,
+{
+    let mut subject: Option<T> = None;
+    let mut artifact_path: Option<PathBuf> = None;
+
+    parse_with_common_options(args, options, |index, value| match value {
+        value if value == subject_name => {
+            let value = next_value(args, index, subject_name)?;
+            if subject.is_some() {
+                return Err(ParseOutcome::Error(format!(
+                    "le type de {command_name} a deja ete fourni"
+                )));
+            }
+            subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
+            Ok(2)
+        }
+        value if value == artifact_name => {
+            let value = next_value(args, index, artifact_name)?;
+            if artifact_path.is_some() {
+                return Err(ParseOutcome::Error(format!(
+                    "l'artefact de {command_name} a deja ete fourni"
+                )));
+            }
+            artifact_path = Some(PathBuf::from(value));
+            Ok(2)
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if subject.is_none() {
+                subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
+                Ok(1)
+            } else if artifact_path.is_none() {
+                artifact_path = Some(PathBuf::from(value));
+                Ok(1)
+            } else {
+                Err(ParseOutcome::Error(format!(
+                    "argument inattendu pour {command_name}: {value}"
+                )))
+            }
+        }
+    })?;
+
+    let subject = subject.ok_or_else(|| {
+        ParseOutcome::Error(format!(
+            "la commande {command_name} requiert un type: plan, audit ou implementation"
+        ))
+    })?;
+    let artifact_path = artifact_path.ok_or_else(|| {
+        ParseOutcome::Error(format!(
+            "la commande {command_name} requiert un artefact. Exemple: cargo run -p app -- {command_name} plan .plan\\plan.md"
+        ))
+    })?;
+
+    Ok(ParsedSubjectArtifact {
+        subject,
+        artifact_path,
+    })
+}
+
+pub fn parse_required_path_with_optional_named_path(
+    args: &[String],
+    options: &mut ServiceCommandOptions,
+    required_option_name: &str,
+    optional_option_name: &str,
+    command_name: &str,
+    required_label: &str,
+    required_example: &str,
+    duplicate_required_message: &str,
+    duplicate_optional_message: &str,
+) -> Result<ParsedRequiredPath, ParseOutcome> {
+    let mut required_path: Option<PathBuf> = None;
+    let mut optional_path: Option<PathBuf> = None;
+
+    parse_with_common_options(args, options, |index, value| match value {
+        value if value == required_option_name => {
+            let value = next_value(args, index, required_option_name)?;
+            if required_path.is_some() {
+                return Err(ParseOutcome::Error(duplicate_required_message.to_string()));
+            }
+            required_path = Some(PathBuf::from(value));
+            Ok(2)
+        }
+        value if value == optional_option_name => {
+            let value = next_value(args, index, optional_option_name)?;
+            if optional_path.is_some() {
+                return Err(ParseOutcome::Error(duplicate_optional_message.to_string()));
+            }
+            optional_path = Some(PathBuf::from(value));
+            Ok(2)
+        }
+        value if value.starts_with("--") => {
+            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+        }
+        value => {
+            if required_path.is_some() {
+                Err(ParseOutcome::Error(format!(
+                    "argument inattendu pour {command_name}: {value}"
+                )))
+            } else {
+                required_path = Some(PathBuf::from(value));
+                Ok(1)
+            }
+        }
+    })?;
+
+    let required_path = required_path.ok_or_else(|| {
+        ParseOutcome::Error(format!(
+            "la commande {command_name} requiert {required_label}. Exemple: {required_example}"
+        ))
+    })?;
+
+    Ok(ParsedRequiredPath {
+        required_path,
+        optional_path,
+    })
+}
+
 pub fn resolve_context() -> Result<ExecutionContext, String> {
     service_paths::current_execution_context()
 }
@@ -175,6 +322,30 @@ pub fn prepare_service_command(
         output_dir: resolve_output_dir(options, context, descriptor.default_output_dir),
         timeout: options.timeout,
     }
+}
+
+pub fn prepare_parse_context(
+    options: &ServiceCommandOptions,
+    descriptor: ServiceCommandDescriptor<'_>,
+) -> Result<PreparedParseContext, String> {
+    let context = resolve_context()?;
+    let workspace_root = context.workspace_root().to_path_buf();
+    let output_dir = resolve_output_dir(options, &context, descriptor.default_output_dir);
+
+    Ok(PreparedParseContext {
+        context,
+        workspace_root,
+        output_dir,
+    })
+}
+
+pub fn prepare_service_from_prompt(
+    options: &ServiceCommandOptions,
+    parse_context: &PreparedParseContext,
+    descriptor: ServiceCommandDescriptor<'_>,
+    prompt: String,
+) -> PreparedServiceCommand {
+    prepare_service_command(options, &parse_context.context, descriptor, prompt)
 }
 
 pub fn execute_service_command(
@@ -291,5 +462,37 @@ mod tests {
         })
         .expect("valid parse");
         assert!(options.verbose);
+    }
+
+    #[test]
+    fn parses_required_path_with_optional_named_path() {
+        let args = [
+            "plan.md",
+            "--implementation",
+            "crates\\app",
+            "--timeout-seconds",
+            "42",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        let mut options = ServiceCommandOptions::new(Duration::from_secs(900));
+
+        let parsed = parse_required_path_with_optional_named_path(
+            &args,
+            &mut options,
+            "--plan",
+            "--implementation",
+            "implementation-audit",
+            "un plan",
+            "cargo run -p app -- implementation-audit .plan\\plan.md",
+            "plan duplique",
+            "implementation dupliquee",
+        )
+        .expect("parse valide");
+
+        assert_eq!(parsed.required_path, PathBuf::from("plan.md"));
+        assert_eq!(parsed.optional_path, Some(PathBuf::from("crates\\app")));
+        assert_eq!(options.timeout, Duration::from_secs(42));
     }
 }

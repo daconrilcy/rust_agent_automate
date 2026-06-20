@@ -9,6 +9,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use super::discovery;
 use super::request::{CodexMode, CodexRequest};
 
+struct ExecCapturePaths {
+    output_file: PathBuf,
+    stderr_file: Option<PathBuf>,
+}
+
 #[derive(Debug)]
 pub struct RunResult {
     pub status: ExitStatus,
@@ -33,13 +38,16 @@ pub fn run_exec(
     verbose: bool,
     use_color_never: bool,
 ) -> io::Result<RunResult> {
-    let output_file = temp_output_file_path();
+    let capture = ExecCapturePaths {
+        output_file: temp_output_file_path(),
+        stderr_file: None,
+    };
 
-    append_exec_capture_args(&mut command, &output_file, use_color_never);
+    append_exec_capture_args(&mut command, &capture.output_file, use_color_never);
 
     if verbose {
         let status = command.status()?;
-        let final_message = read_final_message(&output_file)?;
+        let final_message = read_final_message(&capture.output_file)?;
 
         return Ok(RunResult {
             status,
@@ -52,7 +60,7 @@ pub fn run_exec(
     command.stdin(Stdio::null());
 
     let output = command.output()?;
-    let final_message = read_final_message(&output_file)?;
+    let final_message = read_final_message(&capture.output_file)?;
 
     Ok(RunResult {
         status: output.status,
@@ -68,67 +76,27 @@ pub fn run_exec_until_final_message(
     timeout: Duration,
     use_color_never: bool,
 ) -> io::Result<RunResult> {
-    let output_file = temp_output_file_path();
-    let stderr_file = (!verbose).then(temp_stderr_file_path);
+    let capture = ExecCapturePaths {
+        output_file: temp_output_file_path(),
+        stderr_file: (!verbose).then(temp_stderr_file_path),
+    };
 
-    append_exec_capture_args(&mut command, &output_file, use_color_never);
-    command.stdin(Stdio::null());
-
-    if verbose {
-        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    } else {
-        let stderr = File::create(stderr_file.as_ref().expect("stderr_file is set"))?;
-        command.stdout(Stdio::null()).stderr(Stdio::from(stderr));
-    }
+    configure_exec_child(&mut command, &capture, verbose, use_color_never)?;
 
     let mut child = command.spawn()?;
     let start = Instant::now();
 
     loop {
-        if let Some(final_message) = read_final_message_if_ready(&output_file)? {
-            let status = wait_or_terminate(&mut child, Duration::from_secs(2))?;
-            let stderr = read_optional_file(stderr_file.as_deref())?;
-
-            return Ok(RunResult {
-                status,
-                final_message: Some(final_message),
-                stdout: String::new(),
-                stderr,
-            });
+        if let Some(result) = finish_on_final_message(&mut child, &capture)? {
+            return Ok(result);
         }
 
-        if let Some(status) = child.try_wait()? {
-            let final_message = read_final_message(&output_file)?;
-            let stderr = read_optional_file(stderr_file.as_deref())?;
-
-            return Ok(RunResult {
-                status,
-                final_message,
-                stdout: String::new(),
-                stderr,
-            });
+        if let Some(result) = finish_on_process_exit(&mut child, &capture)? {
+            return Ok(result);
         }
 
         if start.elapsed() >= timeout {
-            let _ = terminate_process_tree(&mut child);
-            let _ = child.wait();
-            let stderr =
-                read_optional_file_without_removing(stderr_file.as_deref()).unwrap_or_default();
-            let stderr = tail_for_error(&stderr, 4_000);
-            let diagnostics = timeout_diagnostics(&output_file, stderr_file.as_deref());
-            let detail = if stderr.trim().is_empty() {
-                diagnostics
-            } else {
-                format!("{diagnostics}\nDerniere sortie stderr de codex:\n{stderr}")
-            };
-
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!(
-                    "codex n'a pas produit de message final dans les {} secondes{detail}",
-                    timeout.as_secs(),
-                ),
-            ));
+            return Err(timeout_error(&mut child, &capture, timeout)?);
         }
 
         thread::sleep(Duration::from_millis(200));
@@ -179,6 +147,92 @@ pub(crate) fn append_exec_capture_args(
     if use_color_never {
         command.arg("--color").arg("never");
     }
+}
+
+fn configure_exec_child(
+    command: &mut Command,
+    capture: &ExecCapturePaths,
+    verbose: bool,
+    use_color_never: bool,
+) -> io::Result<()> {
+    append_exec_capture_args(command, &capture.output_file, use_color_never);
+    command.stdin(Stdio::null());
+
+    if verbose {
+        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    } else {
+        let stderr = File::create(
+            capture
+                .stderr_file
+                .as_ref()
+                .expect("stderr_file is set for non-verbose exec"),
+        )?;
+        command.stdout(Stdio::null()).stderr(Stdio::from(stderr));
+    }
+
+    Ok(())
+}
+
+fn finish_on_final_message(
+    child: &mut Child,
+    capture: &ExecCapturePaths,
+) -> io::Result<Option<RunResult>> {
+    let Some(final_message) = read_final_message_if_ready(&capture.output_file)? else {
+        return Ok(None);
+    };
+    let status = wait_or_terminate(child, Duration::from_secs(2))?;
+    let stderr = read_optional_file(capture.stderr_file.as_deref())?;
+
+    Ok(Some(RunResult {
+        status,
+        final_message: Some(final_message),
+        stdout: String::new(),
+        stderr,
+    }))
+}
+
+fn finish_on_process_exit(
+    child: &mut Child,
+    capture: &ExecCapturePaths,
+) -> io::Result<Option<RunResult>> {
+    let Some(status) = child.try_wait()? else {
+        return Ok(None);
+    };
+    let final_message = read_final_message(&capture.output_file)?;
+    let stderr = read_optional_file(capture.stderr_file.as_deref())?;
+
+    Ok(Some(RunResult {
+        status,
+        final_message,
+        stdout: String::new(),
+        stderr,
+    }))
+}
+
+fn timeout_error(
+    child: &mut Child,
+    capture: &ExecCapturePaths,
+    timeout: Duration,
+) -> io::Result<io::Error> {
+    let _ = terminate_process_tree(child);
+    let _ = child.wait();
+    let stderr =
+        read_optional_file_without_removing(capture.stderr_file.as_deref()).unwrap_or_default();
+    let stderr = tail_for_error(&stderr, 4_000);
+    let diagnostics = timeout_diagnostics(&capture.output_file, capture.stderr_file.as_deref());
+    let detail = if stderr.trim().is_empty() {
+        diagnostics
+    } else {
+        format!("{diagnostics}\nDerniere sortie stderr de codex:\n{stderr}")
+    };
+
+    Ok(io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "codex n'a pas produit de message final dans les {} secondes{detail}",
+            timeout.as_secs(),
+        ),
+    ))
 }
 
 fn wait_or_terminate(child: &mut Child, grace_period: Duration) -> io::Result<ExitStatus> {
@@ -472,5 +526,13 @@ mod tests {
 
         assert_eq!(result.as_deref(), Some("reponse finale"));
         assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+    }
+
+    #[test]
+    fn timeout_diagnostics_mentions_capture_files() {
+        let message = timeout_diagnostics(Path::new("last.txt"), Some(Path::new("stderr.txt")));
+
+        assert!(message.contains("last.txt"));
+        assert!(message.contains("stderr.txt"));
     }
 }

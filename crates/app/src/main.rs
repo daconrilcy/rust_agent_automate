@@ -3,20 +3,20 @@ use std::process;
 use app::automate::{self, AutomateCommand};
 use app::cli::{self, CliCommand};
 use app::codex::{self, CodexRequest};
-use app::{audit, fix_loop, implementation_audit, plan, review};
+use app::{run_audit, run_fix_loop, run_implementation_audit, run_plan, run_review};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match cli::parse_args(&args) {
         Ok(CliCommand::Run(request)) => run_request(&request),
-        Ok(CliCommand::Audit(request)) => run_service_command(audit::run(&request)),
-        Ok(CliCommand::Plan(request)) => run_service_command(plan::run(&request)),
+        Ok(CliCommand::Audit(request)) => run_service_command(run_audit(&request)),
+        Ok(CliCommand::Plan(request)) => run_service_command(run_plan(&request)),
         Ok(CliCommand::ImplementationAudit(request)) => {
-            run_service_command(implementation_audit::run(&request))
+            run_service_command(run_implementation_audit(&request))
         }
-        Ok(CliCommand::Review(request)) => run_service_command(review::run(&request)),
-        Ok(CliCommand::FixLoop(request)) => run_service_command(fix_loop::run(&request)),
+        Ok(CliCommand::Review(request)) => run_service_command(run_review(&request)),
+        Ok(CliCommand::FixLoop(request)) => run_service_command(run_fix_loop(&request)),
         Ok(CliCommand::Automate(request)) => run_automate(&request),
         Ok(CliCommand::RefactorAutomate(request)) => run_refactor_automate(&request),
         Err(cli::ParseOutcome::Help) => cli::print_help(),

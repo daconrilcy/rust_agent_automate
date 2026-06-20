@@ -100,20 +100,23 @@ pub fn parse_args(args: &[String]) -> Result<PlanCommand, ParseOutcome> {
         }
     })?;
 
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
-    let workspace_root = context.workspace_root().to_path_buf();
+    let parse_context = service_command::prepare_parse_context(&common, PLAN_DESCRIPTOR)
+        .map_err(ParseOutcome::Error)?;
+    let workspace_root = parse_context.workspace_root.clone();
     let audit_path = resolve_audit_file(audit_path.ok_or_else(|| {
         ParseOutcome::Error(
             "la commande plan requiert un chemin d'audit. Exemple: cargo run -p app -- plan .audit\\audit.md"
                 .to_string(),
         )
-    })?, &context)
+    })?, &parse_context.context)
     .map_err(ParseOutcome::Error)?;
-    let preview_output_dir =
-        service_command::resolve_output_dir(&common, &context, PLAN_DESCRIPTOR.default_output_dir);
-    let prompt = build_prompt(&workspace_root, &audit_path, &preview_output_dir);
-    let service =
-        service_command::prepare_service_command(&common, &context, PLAN_DESCRIPTOR, prompt);
+    let prompt = build_prompt(&workspace_root, &audit_path, &parse_context.output_dir);
+    let service = service_command::prepare_service_from_prompt(
+        &common,
+        &parse_context,
+        PLAN_DESCRIPTOR,
+        prompt,
+    );
 
     Ok(PlanCommand {
         service,

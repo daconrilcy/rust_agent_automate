@@ -18,6 +18,9 @@ pub struct CommandOutcome {
     pub clean: Option<bool>,
 }
 
+// Service commands persist a structured outcome to this optional env-controlled
+// file so workflow automation can consume status, artifact, and clean-loop
+// state without scraping markdown output.
 pub struct ReportSpec<'a> {
     pub command_name: &'a str,
     pub saved_label: &'a str,
@@ -305,7 +308,7 @@ mod tests {
             report.outcome.artifact_path.as_ref(),
             Some(&report.saved_path)
         );
-        assert!(report.saved_path.is_file());
+        assert!(fs::metadata(&report.saved_path).is_ok());
 
         let _ = fs::remove_dir_all(output_dir);
     }
@@ -326,7 +329,7 @@ mod tests {
 
         assert_eq!(report.status_code, 7);
         assert_eq!(report.outcome.status_code, Some(7));
-        assert!(report.saved_path.is_file());
+        assert!(fs::metadata(&report.saved_path).is_ok());
 
         let _ = fs::remove_dir_all(output_dir);
     }

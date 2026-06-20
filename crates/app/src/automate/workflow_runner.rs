@@ -72,32 +72,14 @@ where
             );
             let output = run_step(workflow, step, &context)?;
             let command_outcome = validated_command_outcome(workflow, step, &context, &output)?;
-            if let Some(path) = &command_outcome.artifact_path {
-                context
-                    .artifacts_by_step
-                    .insert(step.name.clone(), path.clone());
-                context.last_artifact = Some(path.clone());
-            }
-            if let Some(clean) = command_outcome.clean {
-                context.clean_by_step.insert(step.name.clone(), clean);
-            }
-            context.last_output = output.stdout.clone();
-            report.step_results.push(StepResult {
-                cycle,
-                name: step.name.clone(),
-                status_code: command_outcome.status_code,
-                artifact_path: command_outcome.artifact_path,
-            });
+            apply_step_outcome(&mut context, step, &output, &command_outcome);
+            append_step_result(&mut report, cycle, step, command_outcome);
             if !output.success {
-                return Err(io::Error::other(format!(
-                    "l'etape automate '{}' a echoue avec le statut {}{}{}",
-                    step.name,
-                    command_outcome
-                        .status_code
-                        .map_or_else(|| "inconnu".to_string(), |c| c.to_string()),
-                    format_stream("stdout", &output.stdout),
-                    format_stream("stderr", &output.stderr)
-                )));
+                return Err(step_failure(
+                    step,
+                    &output,
+                    report.step_results.last().expect("step result"),
+                ));
             }
         }
         report.completed_cycles = cycle;
@@ -110,6 +92,50 @@ where
     }
 
     Ok(report)
+}
+
+fn apply_step_outcome(
+    context: &mut RunContext,
+    step: &WorkflowStep,
+    output: &StepExecution,
+    command_outcome: &crate::reporting::CommandOutcome,
+) {
+    if let Some(path) = &command_outcome.artifact_path {
+        context
+            .artifacts_by_step
+            .insert(step.name.clone(), path.clone());
+        context.last_artifact = Some(path.clone());
+    }
+    if let Some(clean) = command_outcome.clean {
+        context.clean_by_step.insert(step.name.clone(), clean);
+    }
+    context.last_output = output.stdout.clone();
+}
+
+fn append_step_result(
+    report: &mut AutomateReport,
+    cycle: u32,
+    step: &WorkflowStep,
+    command_outcome: crate::reporting::CommandOutcome,
+) {
+    report.step_results.push(StepResult {
+        cycle,
+        name: step.name.clone(),
+        status_code: command_outcome.status_code,
+        artifact_path: command_outcome.artifact_path,
+    });
+}
+
+fn step_failure(step: &WorkflowStep, output: &StepExecution, result: &StepResult) -> io::Error {
+    io::Error::other(format!(
+        "l'etape automate '{}' a echoue avec le statut {}{}{}",
+        step.name,
+        result
+            .status_code
+            .map_or_else(|| "inconnu".to_string(), |c| c.to_string()),
+        format_stream("stdout", &output.stdout),
+        format_stream("stderr", &output.stderr)
+    ))
 }
 
 fn validated_command_outcome(
@@ -295,5 +321,42 @@ mod tests {
         );
         let _ = fs::remove_dir_all(workspace);
         let _ = fs::remove_dir_all(outside.parent().expect("parent outside"));
+    }
+
+    #[test]
+    fn apply_step_outcome_updates_context_state() {
+        let mut context = RunContext::default();
+        let step = WorkflowStep {
+            name: "audit".to_string(),
+            rust_command: vec!["audit".to_string()],
+            kind: crate::automate::workflow_model::WorkflowStepKind::ServiceCommand,
+            fresh_codex_call: true,
+            model: None,
+            reasoning: None,
+            timeout_seconds: None,
+        };
+        let output = StepExecution {
+            status_code: Some(0),
+            success: true,
+            stdout: "done".to_string(),
+            stderr: String::new(),
+            command_outcome: None,
+        };
+        let outcome = crate::reporting::CommandOutcome {
+            command_name: "audit".to_string(),
+            status_code: Some(0),
+            final_message_present: true,
+            artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
+            clean: Some(true),
+        };
+
+        apply_step_outcome(&mut context, &step, &output, &outcome);
+
+        assert_eq!(context.last_output, "done");
+        assert_eq!(
+            context.last_artifact,
+            Some(PathBuf::from("C:\\repo\\.audit\\audit.md"))
+        );
+        assert_eq!(context.clean_by_step.get("audit"), Some(&true));
     }
 }

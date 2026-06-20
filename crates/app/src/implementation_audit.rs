@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::cli::{ParseOutcome, next_value};
+use crate::cli::ParseOutcome;
 use crate::reporting;
 use crate::service_command::{
-    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+    self, ParsedRequiredPath, PreparedServiceCommand, ServiceCommandDescriptor,
+    ServiceCommandOptions,
 };
 use crate::service_paths::{self, PathRequirement};
 
@@ -116,72 +117,39 @@ pub fn run(
 
 pub fn parse_args(args: &[String]) -> Result<ImplementationAuditCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(900));
-    let mut plan_path: Option<PathBuf> = None;
-    let mut implementation_path: Option<PathBuf> = None;
-
-    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
-        "--plan" => {
-            let value = next_value(args, index, "--plan")?;
-            if plan_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    "le plan d'implementation a deja ete fourni".to_string(),
-                ));
-            }
-            plan_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        "--implementation" => {
-            let value = next_value(args, index, "--implementation")?;
-            if implementation_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    "le chemin d'implementation a deja ete fourni".to_string(),
-                ));
-            }
-            implementation_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
-        value => {
-            if plan_path.is_some() {
-                Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour implementation-audit: {value}"
-                )))
-            } else {
-                plan_path = Some(PathBuf::from(value));
-                Ok(1)
-            }
-        }
-    })?;
-
-    let plan_path = plan_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande implementation-audit requiert un plan. Exemple: cargo run -p app -- implementation-audit .plan\\plan.md"
-                .to_string(),
-        )
-    })?;
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
-    let workspace_root = context.workspace_root().to_path_buf();
-    let plan_path = resolve_plan_file(plan_path, &context).map_err(ParseOutcome::Error)?;
+    let ParsedRequiredPath {
+        required_path: plan_path,
+        optional_path: implementation_path,
+    } = service_command::parse_required_path_with_optional_named_path(
+        args,
+        &mut common,
+        "--plan",
+        "--implementation",
+        "implementation-audit",
+        "un plan",
+        "cargo run -p app -- implementation-audit .plan\\plan.md",
+        "le plan d'implementation a deja ete fourni",
+        "le chemin d'implementation a deja ete fourni",
+    )?;
+    let parse_context =
+        service_command::prepare_parse_context(&common, IMPLEMENTATION_AUDIT_DESCRIPTOR)
+            .map_err(ParseOutcome::Error)?;
+    let workspace_root = parse_context.workspace_root.clone();
+    let plan_path =
+        resolve_plan_file(plan_path, &parse_context.context).map_err(ParseOutcome::Error)?;
     let implementation_path = implementation_path
-        .map(|path| resolve_implementation_path(path, &context))
+        .map(|path| resolve_implementation_path(path, &parse_context.context))
         .transpose()
         .map_err(ParseOutcome::Error)?;
-    let preview_output_dir = service_command::resolve_output_dir(
-        &common,
-        &context,
-        IMPLEMENTATION_AUDIT_DESCRIPTOR.default_output_dir,
-    );
     let prompt = build_prompt(
         &workspace_root,
         &plan_path,
         implementation_path.as_deref(),
-        &preview_output_dir,
+        &parse_context.output_dir,
     );
-    let service = service_command::prepare_service_command(
+    let service = service_command::prepare_service_from_prompt(
         &common,
-        &context,
+        &parse_context,
         IMPLEMENTATION_AUDIT_DESCRIPTOR,
         prompt,
     );

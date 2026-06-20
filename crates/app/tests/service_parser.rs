@@ -514,6 +514,43 @@ fn rejects_fix_loop_without_artifact() {
 }
 
 #[test]
+fn rejects_duplicate_fix_loop_type_argument() {
+    let error = parse(&[
+        "fix-loop",
+        "--type",
+        "plan",
+        "--type",
+        "audit",
+        "Cargo.toml",
+    ])
+    .expect_err("fix-loop ne doit pas accepter deux types");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("le type de fix-loop a deja ete fourni".to_string())
+    );
+}
+
+#[test]
+fn rejects_duplicate_fix_loop_artifact_argument() {
+    let error = parse(&[
+        "fix-loop",
+        "--type",
+        "plan",
+        "--artifact",
+        "Cargo.toml",
+        "--artifact",
+        "README.md",
+    ])
+    .expect_err("fix-loop ne doit pas accepter deux artefacts");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'artefact de fix-loop a deja ete fourni".to_string())
+    );
+}
+
+#[test]
 fn rejects_invalid_fix_loop_input_kind_with_command_specific_error() {
     let error = parse(&["fix-loop", "design", "Cargo.toml"]).expect_err("type invalide");
 
@@ -523,6 +560,36 @@ fn rejects_invalid_fix_loop_input_kind_with_command_specific_error() {
             "type d'entree fix-loop invalide: design. Valeurs attendues: plan, audit, implementation"
                 .to_string()
         )
+    );
+}
+
+#[test]
+fn rejects_duplicate_review_type_argument() {
+    let error = parse(&["review", "--type", "plan", "--type", "audit", "Cargo.toml"])
+        .expect_err("review ne doit pas accepter deux types");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("le type de review a deja ete fourni".to_string())
+    );
+}
+
+#[test]
+fn rejects_duplicate_review_artifact_argument() {
+    let error = parse(&[
+        "review",
+        "--type",
+        "plan",
+        "--artifact",
+        "Cargo.toml",
+        "--artifact",
+        "README.md",
+    ])
+    .expect_err("review ne doit pas accepter deux artefacts");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'artefact de review a deja ete fourni".to_string())
     );
 }
 

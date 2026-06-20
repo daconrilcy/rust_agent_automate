@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::artifact;
-use crate::cli::{ParseOutcome, next_value};
+use crate::cli::ParseOutcome;
 use crate::review::{self, ReviewSubject};
 use crate::service_command::{
-    self, PreparedServiceCommand, ServiceCommandDescriptor, ServiceCommandOptions,
+    self, ParsedSubjectArtifact, PreparedServiceCommand, ServiceCommandDescriptor,
+    ServiceCommandOptions,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -82,76 +83,34 @@ pub fn run(
 
 pub fn parse_args(args: &[String]) -> Result<FixLoopCommand, ParseOutcome> {
     let mut common = ServiceCommandOptions::new(Duration::from_secs(1800));
-    let mut input_kind: Option<ReviewSubject> = None;
-    let mut artifact_path: Option<PathBuf> = None;
-
-    service_command::parse_with_common_options(args, &mut common, |index, value| match value {
-        "--type" => {
-            let value = next_value(args, index, "--type")?;
-            if input_kind.is_some() {
-                return Err(ParseOutcome::Error(
-                    "le type d'entree de fix-loop a deja ete fourni".to_string(),
-                ));
-            }
-            input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
-            Ok(2)
-        }
-        "--artifact" => {
-            let value = next_value(args, index, "--artifact")?;
-            if artifact_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    "l'artefact de fix-loop a deja ete fourni".to_string(),
-                ));
-            }
-            artifact_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
-        value => {
-            if input_kind.is_none() {
-                input_kind = Some(parse_input_kind(value).map_err(ParseOutcome::Error)?);
-                Ok(1)
-            } else if artifact_path.is_none() {
-                artifact_path = Some(PathBuf::from(value));
-                Ok(1)
-            } else {
-                Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour fix-loop: {value}"
-                )))
-            }
-        }
-    })?;
-
-    let input_kind = input_kind.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande fix-loop requiert un type: plan, audit ou implementation".to_string(),
-        )
-    })?;
-    let artifact_path = artifact_path.ok_or_else(|| {
-        ParseOutcome::Error(
-            "la commande fix-loop requiert un artefact. Exemple: cargo run -p app -- fix-loop plan .plan\\plan.md"
-                .to_string(),
-        )
-    })?;
-    let context = service_command::resolve_context().map_err(ParseOutcome::Error)?;
-    let workspace_root = context.workspace_root().to_path_buf();
-    let artifact_path =
-        resolve_artifact_path(input_kind, artifact_path, &context).map_err(ParseOutcome::Error)?;
-    let preview_output_dir = service_command::resolve_output_dir(
-        &common,
-        &context,
-        FIX_LOOP_DESCRIPTOR.default_output_dir,
-    );
+    let ParsedSubjectArtifact {
+        subject: input_kind,
+        artifact_path,
+    } = service_command::parse_subject_and_artifact(
+        args,
+        &mut common,
+        "--type",
+        "--artifact",
+        "fix-loop",
+        parse_input_kind,
+    )?;
+    let parse_context = service_command::prepare_parse_context(&common, FIX_LOOP_DESCRIPTOR)
+        .map_err(ParseOutcome::Error)?;
+    let workspace_root = parse_context.workspace_root.clone();
+    let artifact_path = resolve_artifact_path(input_kind, artifact_path, &parse_context.context)
+        .map_err(ParseOutcome::Error)?;
     let prompt = build_prompt(
         &workspace_root,
         input_kind,
         &artifact_path,
-        &preview_output_dir,
+        &parse_context.output_dir,
     );
-    let service =
-        service_command::prepare_service_command(&common, &context, FIX_LOOP_DESCRIPTOR, prompt);
+    let service = service_command::prepare_service_from_prompt(
+        &common,
+        &parse_context,
+        FIX_LOOP_DESCRIPTOR,
+        prompt,
+    );
 
     Ok(FixLoopCommand {
         service,
@@ -172,6 +131,23 @@ fn parse_input_kind(value: &str) -> Result<ReviewSubject, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_type_keeps_fix_loop_specific_message() {
+        let error = parse_args(&[
+            "--type".to_string(),
+            "plan".to_string(),
+            "--type".to_string(),
+            "audit".to_string(),
+            "Cargo.toml".to_string(),
+        ])
+        .expect_err("double type refuse");
+
+        assert_eq!(
+            error,
+            ParseOutcome::Error("le type de fix-loop a deja ete fourni".to_string())
+        );
+    }
 
     #[test]
     fn prompt_mentions_loop_skill_and_input_kind() {

@@ -15,7 +15,7 @@ mod workflow_runner;
 
 use std::path::PathBuf;
 
-use crate::cli::{ParseLoopControl, ParseOutcome, next_value, scan_args};
+use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen_with_message, next_value, scan_args};
 use crate::service_paths;
 
 #[allow(unused_imports)]
@@ -36,12 +36,10 @@ pub fn parse_automate_args(args: &[String]) -> Result<AutomateCommand, ParseOutc
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => return Err(ParseOutcome::Help),
         "--workflow" => {
-            if named_workflow {
-                return Err(ParseOutcome::Error(
-                    "le workflow automate a deja ete fourni".to_string(),
-                ));
-            }
-            named_workflow = true;
+            mark_seen_with_message(
+                &mut named_workflow,
+                "le workflow automate a deja ete fourni",
+            )?;
             let value = next_value(args, index, "--workflow")?;
             if workflow_path.is_some() {
                 return Err(ParseOutcome::Error(
@@ -102,23 +100,19 @@ pub fn parse_refactor_automate_args(
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => return Err(ParseOutcome::Help),
         "--workflow" => {
-            if seen_workflow {
-                return Err(ParseOutcome::Error(
-                    "le workflow de refactor-automate a deja ete fourni".to_string(),
-                ));
-            }
-            seen_workflow = true;
+            mark_seen_with_message(
+                &mut seen_workflow,
+                "le workflow de refactor-automate a deja ete fourni",
+            )?;
             let value = next_value(args, index, "--workflow")?;
             workflow_path = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))
         }
         "--target" => {
-            if seen_target {
-                return Err(ParseOutcome::Error(
-                    "la cible de refactor-automate a deja ete fournie".to_string(),
-                ));
-            }
-            seen_target = true;
+            mark_seen_with_message(
+                &mut seen_target,
+                "la cible de refactor-automate a deja ete fournie",
+            )?;
             let value = next_value(args, index, "--target")?;
             target_dir = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))

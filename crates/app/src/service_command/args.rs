@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::cli::{ParseLoopControl, ParseOutcome, next_value, scan_args};
+use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen, next_value, scan_args};
 
 use super::{
     ParsedRequiredPath, ParsedSubjectArtifact, RequiredPathParseSpec, ServiceCommandOptions,
@@ -23,44 +23,24 @@ fn parse_common_option(
     match args[index].as_str() {
         "-h" | "--help" => Err(ParseOutcome::Help),
         "--model" => {
-            if seen.model {
-                return Err(ParseOutcome::Error(
-                    "l'option --model a deja ete fournie".to_string(),
-                ));
-            }
-            seen.model = true;
+            mark_seen(&mut seen.model, "--model")?;
             options.model = next_value(args, index, "--model")?.to_owned();
             Ok(Some(2))
         }
         "--reasoning" => {
-            if seen.reasoning {
-                return Err(ParseOutcome::Error(
-                    "l'option --reasoning a deja ete fournie".to_string(),
-                ));
-            }
-            seen.reasoning = true;
+            mark_seen(&mut seen.reasoning, "--reasoning")?;
             options.reasoning_effort = next_value(args, index, "--reasoning")?
                 .parse()
                 .map_err(ParseOutcome::Error)?;
             Ok(Some(2))
         }
         "--output-dir" => {
-            if seen.output_dir {
-                return Err(ParseOutcome::Error(
-                    "l'option --output-dir a deja ete fournie".to_string(),
-                ));
-            }
-            seen.output_dir = true;
+            mark_seen(&mut seen.output_dir, "--output-dir")?;
             options.output_dir = Some(PathBuf::from(next_value(args, index, "--output-dir")?));
             Ok(Some(2))
         }
         "--timeout-seconds" => {
-            if seen.timeout {
-                return Err(ParseOutcome::Error(
-                    "l'option --timeout-seconds a deja ete fournie".to_string(),
-                ));
-            }
-            seen.timeout = true;
+            mark_seen(&mut seen.timeout, "--timeout-seconds")?;
             options.timeout =
                 crate::cli::parse_timeout(next_value(args, index, "--timeout-seconds")?)?;
             Ok(Some(2))
@@ -75,6 +55,44 @@ fn parse_common_option(
         }
         _ => Ok(None),
     }
+}
+
+fn duplicate_argument(command_name: &str, label: &str) -> ParseOutcome {
+    ParseOutcome::Error(format!("{label} de {command_name} a deja ete fourni"))
+}
+
+fn reject_unknown_option(value: &str) -> Result<usize, ParseOutcome> {
+    Err(ParseOutcome::Error(format!("option inconnue: {value}")))
+}
+
+fn capture_named_path(
+    slot: &mut Option<PathBuf>,
+    args: &[String],
+    index: usize,
+    option_name: &str,
+    duplicate_error: ParseOutcome,
+) -> Result<usize, ParseOutcome> {
+    let value = next_value(args, index, option_name)?;
+    if slot.is_some() {
+        return Err(duplicate_error);
+    }
+    *slot = Some(PathBuf::from(value));
+    Ok(2)
+}
+
+fn capture_positional_path(
+    slot: &mut Option<PathBuf>,
+    command_name: &str,
+    value: &str,
+) -> Result<usize, ParseOutcome> {
+    if slot.is_some() {
+        return Err(ParseOutcome::Error(format!(
+            "argument inattendu pour {command_name}: {value}"
+        )));
+    }
+
+    *slot = Some(PathBuf::from(value));
+    Ok(1)
 }
 
 pub fn parse_with_common_options<F>(
@@ -115,37 +133,25 @@ where
         value if value == subject_name => {
             let value = next_value(args, index, subject_name)?;
             if subject.is_some() {
-                return Err(ParseOutcome::Error(format!(
-                    "le type de {command_name} a deja ete fourni"
-                )));
+                return Err(duplicate_argument(command_name, "le type"));
             }
             subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
             Ok(2)
         }
-        value if value == artifact_name => {
-            let value = next_value(args, index, artifact_name)?;
-            if artifact_path.is_some() {
-                return Err(ParseOutcome::Error(format!(
-                    "l'artefact de {command_name} a deja ete fourni"
-                )));
-            }
-            artifact_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
+        value if value == artifact_name => capture_named_path(
+            &mut artifact_path,
+            args,
+            index,
+            artifact_name,
+            duplicate_argument(command_name, "l'artefact"),
+        ),
+        value if value.starts_with("--") => reject_unknown_option(value),
         value => {
             if subject.is_none() {
                 subject = Some(parse_subject(value).map_err(ParseOutcome::Error)?);
                 Ok(1)
-            } else if artifact_path.is_none() {
-                artifact_path = Some(PathBuf::from(value));
-                Ok(1)
             } else {
-                Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour {command_name}: {value}"
-                )))
+                capture_positional_path(&mut artifact_path, command_name, value)
             }
         }
     })?;
@@ -176,40 +182,22 @@ pub fn parse_required_path_with_optional_named_path(
     let mut optional_path: Option<PathBuf> = None;
 
     parse_with_common_options(args, options, |index, value| match value {
-        value if value == spec.required_option_name => {
-            let value = next_value(args, index, spec.required_option_name)?;
-            if required_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    spec.duplicate_required_message.to_string(),
-                ));
-            }
-            required_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value == spec.optional_option_name => {
-            let value = next_value(args, index, spec.optional_option_name)?;
-            if optional_path.is_some() {
-                return Err(ParseOutcome::Error(
-                    spec.duplicate_optional_message.to_string(),
-                ));
-            }
-            optional_path = Some(PathBuf::from(value));
-            Ok(2)
-        }
-        value if value.starts_with("--") => {
-            Err(ParseOutcome::Error(format!("option inconnue: {value}")))
-        }
-        value => {
-            if required_path.is_some() {
-                Err(ParseOutcome::Error(format!(
-                    "argument inattendu pour {}: {value}",
-                    spec.command_name
-                )))
-            } else {
-                required_path = Some(PathBuf::from(value));
-                Ok(1)
-            }
-        }
+        value if value == spec.required_option_name => capture_named_path(
+            &mut required_path,
+            args,
+            index,
+            spec.required_option_name,
+            ParseOutcome::Error(spec.duplicate_required_message.to_string()),
+        ),
+        value if value == spec.optional_option_name => capture_named_path(
+            &mut optional_path,
+            args,
+            index,
+            spec.optional_option_name,
+            ParseOutcome::Error(spec.duplicate_optional_message.to_string()),
+        ),
+        value if value.starts_with("--") => reject_unknown_option(value),
+        value => capture_positional_path(&mut required_path, spec.command_name, value),
     })?;
 
     let required_path = required_path.ok_or_else(|| {

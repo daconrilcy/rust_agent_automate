@@ -286,6 +286,17 @@ fn rejects_duplicate_run_model_option() {
 }
 
 #[test]
+fn rejects_duplicate_run_reasoning_option() {
+    let error = parse(&["--reasoning", "low", "--reasoning", "high"])
+        .expect_err("run ne doit pas accepter deux niveaux de reasoning");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'option --reasoning a deja ete fournie".to_string())
+    );
+}
+
+#[test]
 fn parses_refactor_automate_with_default_workflow() {
     let command = parse(&["refactor-automate", "--target", ".", "Durcir", "le", "code"])
         .expect("refactor-automate parse");
@@ -354,6 +365,69 @@ fn rejects_duplicate_refactor_automate_target_option() {
     assert_eq!(
         error,
         ParseOutcome::Error("la cible de refactor-automate a deja ete fournie".to_string())
+    );
+}
+
+#[test]
+fn rejects_duplicate_plan_output_dir_option() {
+    let error = parse(&[
+        "plan",
+        "Cargo.toml",
+        "--output-dir",
+        ".plan",
+        "--output-dir",
+        ".other-plan",
+    ])
+    .expect_err("plan ne doit pas accepter deux dossiers de sortie");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'option --output-dir a deja ete fournie".to_string())
+    );
+}
+
+#[test]
+fn rejects_duplicate_implementation_audit_timeout_option() {
+    let error = parse(&[
+        "implementation-audit",
+        "Cargo.toml",
+        "--timeout-seconds",
+        "42",
+        "--timeout-seconds",
+        "84",
+    ])
+    .expect_err("implementation-audit ne doit pas accepter deux timeouts");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("l'option --timeout-seconds a deja ete fournie".to_string())
+    );
+}
+
+#[test]
+fn parses_review_with_named_type_and_positional_artifact() {
+    let command = parse(&["review", "--type", "implementation", "."])
+        .expect("review doit accepter type nomme et artefact positionnel");
+
+    let CliCommand::Service(ServiceCommandDispatch::Review(review)) = command else {
+        panic!("la commande attendue est review");
+    };
+
+    assert_eq!(review.subject, app::ReviewSubject::Implementation);
+    assert_eq!(
+        normalize_path(&review.artifact_path),
+        normalize_path(Path::new("."))
+    );
+}
+
+#[test]
+fn rejects_unknown_option_for_fix_loop() {
+    let error = parse(&["fix-loop", "audit", "Cargo.toml", "--bogus"])
+        .expect_err("fix-loop doit rejeter les options inconnues");
+
+    assert_eq!(
+        error,
+        ParseOutcome::Error("option inconnue: --bogus".to_string())
     );
 }
 

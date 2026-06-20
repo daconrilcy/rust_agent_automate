@@ -89,6 +89,19 @@ pub fn parse_timeout(value: &str) -> Result<Duration, ParseOutcome> {
     Ok(Duration::from_secs(seconds))
 }
 
+pub fn mark_seen(seen: &mut bool, option_name: &str) -> Result<(), ParseOutcome> {
+    mark_seen_with_message(seen, &format!("l'option {option_name} a deja ete fournie"))
+}
+
+pub fn mark_seen_with_message(seen: &mut bool, message: &str) -> Result<(), ParseOutcome> {
+    if *seen {
+        return Err(ParseOutcome::Error(message.to_string()));
+    }
+
+    *seen = true;
+    Ok(())
+}
+
 pub fn scan_args<F>(args: &[String], mut handler: F) -> Result<Option<usize>, ParseOutcome>
 where
     F: FnMut(usize, &str) -> Result<ParseLoopControl, ParseOutcome>,
@@ -126,34 +139,19 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => return Err(ParseOutcome::Help),
         "--model" => {
-            if seen_model {
-                return Err(ParseOutcome::Error(
-                    "l'option --model a deja ete fournie".to_string(),
-                ));
-            }
-            seen_model = true;
+            mark_seen(&mut seen_model, "--model")?;
             let value = next_value(args, index, "--model")?;
             model = value.to_owned();
             Ok(ParseLoopControl::Continue(2))
         }
         "--reasoning" => {
-            if seen_reasoning {
-                return Err(ParseOutcome::Error(
-                    "l'option --reasoning a deja ete fournie".to_string(),
-                ));
-            }
-            seen_reasoning = true;
+            mark_seen(&mut seen_reasoning, "--reasoning")?;
             let value = next_value(args, index, "--reasoning")?;
             reasoning_effort = value.parse().map_err(ParseOutcome::Error)?;
             Ok(ParseLoopControl::Continue(2))
         }
         "--mode" => {
-            if seen_mode {
-                return Err(ParseOutcome::Error(
-                    "l'option --mode a deja ete fournie".to_string(),
-                ));
-            }
-            seen_mode = true;
+            mark_seen(&mut seen_mode, "--mode")?;
             let value = next_value(args, index, "--mode")?;
             mode = value.parse().map_err(ParseOutcome::Error)?;
             Ok(ParseLoopControl::Continue(2))

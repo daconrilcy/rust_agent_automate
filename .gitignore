@@ -5,3 +5,5 @@
 .plan/
 .cargo-target-verify*/
 .cargo-target-loop*/
+.audit_tmp_target/
+.target-verify/

@@ -10,8 +10,7 @@ pub mod workflow_runner;
 pub use parse::AutomationError;
 pub(crate) use parse::classify_step_kind;
 pub(crate) use parse::{parse_automate_args, parse_refactor_automate_args};
-pub(crate) use workflow_model::{
-    AutomateCommand, RefactorAutomateCommand, Workflow, WorkflowParseError,
-};
+pub(crate) use workflow_model::WorkflowParseError;
+pub use workflow_model::{AutomateCommand, RefactorAutomateCommand, Workflow};
 pub use workflow_model::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
 pub(crate) use workflow_runner::run_workflow;

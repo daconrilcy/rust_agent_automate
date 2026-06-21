@@ -136,3 +136,81 @@ pub fn timeout_diagnostics(output_file: &Path, stderr_file: Option<&Path>) -> St
 
     message
 }
+
+// Tests locaux: la gestion des fichiers temporaires de capture est un detail
+// du runner Codex, pas une API de comportement du binaire.
+#[cfg(test)]
+mod tests {
+    use super::{read_final_message, read_final_message_if_ready, timeout_diagnostics};
+
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "rust_agent_{prefix}_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ))
+    }
+
+    #[test]
+    fn read_final_message_returns_none_for_missing_file() {
+        let missing = temp_dir("missing_final_message").join("missing.txt");
+
+        let result = read_final_message(&missing).expect("la lecture doit gerer un fichier absent");
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn read_final_message_trims_and_deletes_file() {
+        let path = temp_dir("capture").join("final.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("creation du dossier");
+        fs::write(&path, "  reponse finale  \n").expect("ecriture du fichier temporaire");
+
+        let result = read_final_message(&path).expect("lecture du fichier");
+
+        assert_eq!(result.as_deref(), Some("reponse finale"));
+        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn read_final_message_if_ready_preserves_empty_file() {
+        let path = temp_dir("capture_ready_empty").join("final.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("creation du dossier");
+        fs::write(&path, " \n\t ").expect("ecriture du fichier temporaire");
+
+        let result =
+            read_final_message_if_ready(&path).expect("lecture du fichier temporaire vide");
+
+        assert_eq!(result, None);
+        assert!(path.exists(), "le fichier vide doit rester disponible");
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn read_final_message_if_ready_trims_and_deletes_file() {
+        let path = temp_dir("capture_ready").join("final.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("creation du dossier");
+        fs::write(&path, "  reponse prete  \n").expect("ecriture du fichier temporaire");
+
+        let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
+
+        assert_eq!(result.as_deref(), Some("reponse prete"));
+        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn timeout_diagnostics_mentions_capture_files() {
+        let message = timeout_diagnostics(Path::new("last.txt"), Some(Path::new("stderr.txt")));
+
+        assert!(message.contains("last.txt"));
+        assert!(message.contains("stderr.txt"));
+    }
+}

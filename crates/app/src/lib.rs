@@ -1,35 +1,35 @@
-//! Internal-first library surface for the `app` binary and its integration tests.
-//! The exported modules below are supported as crate-local seams, not as a long-term
-//! general-purpose public API contract.
+//! Thin application facade for the `app` binary and behavior-level integration tests.
 
-pub mod artifact;
+mod artifact;
 mod artifact_subject;
 mod audit;
-pub mod automate;
+mod automate;
 mod cli;
-pub mod codex;
+mod codex;
 mod command_registry;
 mod fix_loop;
 mod implementation_audit;
 mod plan;
-pub mod prompt;
+mod prompt;
 mod reporting;
 mod review;
-pub mod service_command;
-pub mod service_paths;
+mod service_command;
+mod service_paths;
 
 pub use artifact_subject::ReviewSubject;
-pub use automate::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
-pub use cli::{CliCommand, ParseOutcome, parse_args, parse_timeout, print_help};
+pub use audit::AuditCommand;
+pub use automate::{
+    AutomateCommand, RefactorAutomateCommand, Workflow, WorkflowStepKind,
+    default_refactor_workflow, parse_workflow,
+};
+pub use cli::{CliCommand, ParseOutcome, parse_args, print_help};
 pub use codex::{
     AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
-    ReasoningEffort, RunResult, process_exit_code,
+    ReasoningEffort, process_exit_code,
 };
-pub use command_registry::registered_commands;
-pub use reporting::{
-    CommandOutcome, ReportFailure, ReportSpec, command_failure_outcome,
-    detect_clean_implementation_audit, finalize_report, write_command_outcome,
-};
-pub use service_command::{
-    RequiredPathParseSpec, ServiceCommandDescriptor, ServiceCommandKind, ServiceCommandOptions,
-};
+pub use command_registry::{RegisteredCommand, registered_commands};
+pub use fix_loop::FixLoopCommand;
+pub use implementation_audit::ImplementationAuditCommand;
+pub use plan::PlanCommand;
+pub use review::ReviewCommand;
+pub use service_command::{PreparedServiceCommand, ServiceCommandDispatch};

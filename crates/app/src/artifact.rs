@@ -49,3 +49,45 @@ fn artifact_path(output_dir: &Path, prefix: &str, timestamp: u64, attempt: u16) 
 
     output_dir.join(format!("{prefix}-{timestamp}-{attempt}.md"))
 }
+
+// Tests locaux: ils verifient l'invariant prive de generation de noms uniques
+// sans exposer le module d'artefact comme API publique de confort.
+#[cfg(test)]
+mod tests {
+    use super::save_timestamped_markdown;
+
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "rust_agent_{prefix}_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ))
+    }
+
+    #[test]
+    fn save_timestamped_markdown_does_not_overwrite_existing_file() {
+        let output_dir = temp_dir("artifact_test");
+
+        let first =
+            save_timestamped_markdown(&output_dir, "plan", "first").expect("premiere ecriture");
+        let second =
+            save_timestamped_markdown(&output_dir, "plan", "second").expect("deuxieme ecriture");
+
+        assert_ne!(first, second);
+        assert_eq!(
+            fs::read_to_string(first).expect("lecture du premier artefact"),
+            "first"
+        );
+        assert_eq!(
+            fs::read_to_string(second).expect("lecture du deuxieme artefact"),
+            "second"
+        );
+
+        let _ = fs::remove_dir_all(output_dir);
+    }
+}

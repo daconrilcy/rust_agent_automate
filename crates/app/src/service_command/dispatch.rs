@@ -14,7 +14,7 @@ pub enum ServiceCommandDispatch {
 }
 
 impl ServiceCommandDispatch {
-    pub fn kind(&self) -> super::ServiceCommandKind {
+    pub(crate) fn kind(&self) -> super::ServiceCommandKind {
         match self {
             Self::Audit(_) => super::ServiceCommandKind::Audit,
             Self::Plan(_) => super::ServiceCommandKind::Plan,

@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use app::{ParseOutcome, parse_timeout};
 use app::{ReviewSubject, parse_args, registered_commands};
 
 struct CurrentDirGuard {
@@ -70,12 +69,6 @@ fn registered_commands_expose_usage_examples_and_aliases() {
 }
 
 #[test]
-fn parse_timeout_rejects_zero_and_accepts_positive_values() {
-    assert!(parse_timeout("0").is_err());
-    assert_eq!(parse_timeout("42").expect("timeout valide").as_secs(), 42);
-}
-
-#[test]
 #[cfg(windows)]
 fn audit_accepts_windows_verbatim_target_path() {
     let workspace = support::temp_dir("cli_verbatim_target");
@@ -123,14 +116,4 @@ fn review_aliases_and_subjects_still_parse_through_public_cli() {
     assert_eq!(review.subject, ReviewSubject::Plan);
 
     let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn parse_timeout_error_remains_stable() {
-    assert_eq!(
-        parse_timeout("0"),
-        Err(ParseOutcome::Error(
-            "timeout invalide: 0. Valeur attendue: nombre de secondes positif".to_string()
-        ))
-    );
 }

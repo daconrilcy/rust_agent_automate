@@ -226,3 +226,47 @@ pub fn command_outcome_for_step(
         &step.name,
     ))
 }
+
+// Tests locaux: la conversion d'un resultat structure en outcome de step est
+// une regle interne d'orchestration, pas une frontiere publique du crate.
+#[cfg(test)]
+mod tests {
+    use super::{StepExecution, command_outcome_for_step};
+    use crate::automate::workflow_model::parse_workflow;
+    use crate::automate::workflow_runner::RunContext;
+    use crate::reporting::CommandOutcome;
+
+    use std::path::PathBuf;
+
+    #[test]
+    fn command_outcome_for_step_extracts_automation_state() {
+        let workflow = parse_workflow(
+            r#"{"steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]}"#,
+        )
+        .expect("workflow valide");
+        let step = &workflow.steps[0];
+        let output = StepExecution {
+            status_code: Some(0),
+            success: true,
+            stdout: String::new(),
+            stderr: String::new(),
+            command_outcome: Some(CommandOutcome {
+                command_name: step.name.clone(),
+                status_code: Some(0),
+                final_message_present: true,
+                artifact_path: Some(PathBuf::from("C:\\repo\\.audit\\audit.md")),
+                clean: Some(true),
+            }),
+        };
+
+        let outcome = command_outcome_for_step(&workflow, step, &RunContext::default(), &output)
+            .expect("resultat structure");
+
+        assert_eq!(outcome.status_code, Some(0));
+        assert_eq!(
+            outcome.artifact_path,
+            Some(PathBuf::from("C:\\repo\\.audit\\audit.md"))
+        );
+        assert_eq!(outcome.clean, Some(true));
+    }
+}

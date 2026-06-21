@@ -67,6 +67,10 @@ impl CliCommand {
 }
 
 pub fn parse_args(args: &[String]) -> Result<CliCommand, ParseOutcome> {
+    if args.is_empty() {
+        return Err(ParseOutcome::Help);
+    }
+
     // CLI routing stops at choosing direct-run versus a registered subcommand.
     // Subcommand-specific parsing stays in the registry and service modules.
     if let Some(result) = command_registry::parse_registered_subcommand(args) {

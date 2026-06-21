@@ -20,22 +20,10 @@ fn shared_parser_handles_named_and_positional_inputs() {
 }
 
 #[test]
-fn parses_defaults() {
-    let command = parse(&[]).expect("la configuration par defaut doit etre valide");
+fn empty_invocation_prints_help_instead_of_opening_codex() {
+    let error = parse(&[]).expect_err("l'appel sans argument doit afficher l'aide");
 
-    let CliCommand::Run(request) = command else {
-        panic!("la commande par defaut doit etre le mode run");
-    };
-
-    assert_eq!(request.model, DEFAULT_MODEL);
-    assert_eq!(request.reasoning_effort, DEFAULT_REASONING_EFFORT);
-    assert_eq!(request.mode, CodexMode::Interactive);
-    assert_eq!(request.prompt, None);
-    assert!(!request.verbose);
-    assert!(request.agent_context.solo);
-    assert!(request.agent_context.windows_only);
-    assert!(!request.agent_context.portability);
-    assert!(!request.agent_context.docker);
+    assert_eq!(error, ParseOutcome::Help);
 }
 
 #[test]

@@ -1,22 +1,23 @@
 # rust_agent
 
-Workspace Cargo minimal pour demarrer un programme Rust.
+Workspace Cargo qui fournit un wrapper local autour du CLI `codex` et plusieurs commandes Rust d'orchestration pour auditer, planifier, corriger et automatiser des refactorings.
 
-Le crate `app` contient un premier module Rust capable de lancer `codex` en terminal en configurant:
+Le crate `app` contient le binaire. Il peut lancer `codex` en terminal en configurant:
 - le modele via `--model` (`gpt-5.4` par defaut)
 - le niveau de raisonnement via `--reasoning` (`low` par defaut, valeurs possibles: `low`, `medium`, `high`)
 - le mode via `--mode` (`interactive` ou `exec`)
 - la verbosite via `--verbose` pour voir la sortie brute de `codex exec`
+- la reprise de conversation Codex via `--continue-codex`
 - les droits d'execution de l'agent Codex via `--sandbox`, `--ask-for-approval`, `--add-dir` et, en dernier recours seulement, `--dangerously-bypass-approvals-and-sandbox`
 - le contexte agentique par defaut: developpement solo, local, Windows-only, sans objectif de portabilite implicite
-- des extensions de contexte via `--team`, `--portable`/`--portability`, et `--docker` quand une commande doit raisonner pour une equipe, une cible portable ou une execution conteneurisee
+- des extensions de contexte via `--solo`, `--team`, `--windows-only`, `--portable`/`--portability`, et `--docker` quand une commande doit raisonner pour une equipe, une cible portable ou une execution conteneurisee
 - un audit Rust via le skill Codex central `rust-refactor-audit`, avec `--target` pour choisir le dossier a auditer et sauvegarde du rapport dans `.audit`
 - un plan d'integration depuis un audit via le skill Codex central `refactor-plan-from-audit`, avec sauvegarde du plan dans `.plan`
 - un audit d'implementation depuis un plan via le skill Codex central `rust-implementation-plan-audit`, avec sauvegarde du rapport dans `.audit`
 - une review adversariale via le skill Codex central `adversarial-review`, en precisant si l'entree est un `plan`, un `audit` ou une `implementation`, avec sauvegarde dans `.review`
 - une boucle review/correction via le skill Codex central `rust-review-fix-loop`, en partant d'un `audit`, d'un `plan` ou d'une `implementation`, avec sauvegarde du rapport dans `.fix-loop`
-- un automate JSON via `automate`, capable d'enchainer les services Rust du binaire courant
-- un automate de refactoring via `refactor-automate`, qui cible un dossier donne ou le workspace local par defaut
+- un automate JSON via `automate`, capable d'enchainer les services Rust du binaire courant et des appels Codex directs
+- un automate de refactoring via `refactor-automate`, qui cible un dossier donne ou le workspace local par defaut, avec `workflows/refactor.json` comme workflow integre
 
 ## Commandes utiles
 
@@ -41,14 +42,19 @@ cargo run -q -p app -- review implementation crates\app
 cargo run -q -p app -- fix-loop plan .plan\plan-1781894465.md
 cargo run -q -p app -- fix-loop audit .audit\audit-1781887189.md
 cargo run -q -p app -- fix-loop implementation crates\app
+cargo run -q -p app -- loop implementation crates\app
 cargo run -q -p app -- automate .\workflow.json "Objectif initial"
+cargo run -q -p app -- automate --workflow .\workflow.json "Objectif initial"
 cargo run -q -p app -- refactor-automate --target crates\app "Refactoring SOLID/KISS/DRY"
 cargo run -q -p app -- refactor-automate --target ..\mon-projet --sandbox danger-full-access --ask-for-approval never
+cargo run -q -p app -- refactor-auto --target crates\app
 ```
 
 ## Verification locale
 
 L'application charge automatiquement un fichier `.env` depuis le repertoire de lancement. Copie `.env.example` vers `.env` pour configurer les chemins locaux utiles a l'application, par exemple `CODEX_CLI_PATH`.
+
+Le binaire cherche Codex dans cet ordre pratique: `CODEX_CLI_PATH`, les extensions VS Code `openai.chatgpt-*`, `%USERPROFILE%\AppData\Roaming\npm\codex.exe` / `codex.cmd`, puis `codex.exe`, `codex` ou `codex.cmd` dans le `PATH`.
 
 ## Droits de l'agent Codex
 
@@ -66,6 +72,16 @@ Valeurs supportees:
 - `--ask-for-approval untrusted|on-failure|on-request|never`
 - `--add-dir <chemin>` repetable pour rendre d'autres dossiers accessibles en ecriture
 - `--dangerously-bypass-approvals-and-sandbox` pour executer sans prompts ni sandbox, uniquement si l'environnement externe est deja isole
+
+Options communes utiles sur les commandes Codex:
+- `--model <nom>` et `--reasoning low|medium|high`
+- `--verbose`
+- `--continue-codex`
+- `--output-dir <chemin>` et `--timeout-seconds <secondes>` sur les commandes de service (`audit`, `plan`, `implementation-audit`, `review`, `fix-loop`)
+- `--workflow <workflow.json>` sur `automate` et `refactor-automate`
+- `--target <dossier>` sur `audit` et `refactor-automate`
+
+Timeouts par defaut des commandes de service: `audit`, `plan`, `implementation-audit` et `review` utilisent 900 secondes; `fix-loop` utilise 1800 secondes. Les workflows JSON peuvent injecter un timeout par defaut ou par etape.
 
 Pour un refactor local autonome sur Windows, le profil pratique est:
 
@@ -98,10 +114,11 @@ Le script [install.ps1](install.ps1) compile le binaire en release, copie l'exec
 rust_agent --help
 ```
 
-Par defaut, Cargo produit `app.exe`; le script l'installe comme `rust_agent.exe`. Pour changer le nom de commande ou le dossier d'installation:
+Par defaut, Cargo produit `app.exe`; le script l'installe comme `rust_agent.exe`. Il compile dans `.target-install` pour eviter de reutiliser `target`. Pour changer le nom de commande, le dossier d'installation ou le dossier de build:
 
 ```powershell
 .\install.ps1 -CommandName app -InstallRoot "$env:LOCALAPPDATA\Programs"
+.\install.ps1 -TargetDir .target-install-custom -NoPathUpdate
 ```
 
 ## Note d'architecture
@@ -156,10 +173,11 @@ Champs d'etape:
 - `model`: modele Codex de l'etape, ou `null` pour le modele par defaut
 - `reasoning`: `low`, `medium`, `high`, ou `null` pour le reasoning par defaut
 - `fresh_codex_call`: indique si l'etape repart d'un appel Codex vierge ou depend du contexte precedent
+- `timeout_seconds`: timeout optionnel de l'etape; sinon la valeur de `defaults.timeout_seconds` est utilisee, puis 1800 secondes par defaut
 
 Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`. Les references `{artifact:<nom_etape>}` doivent viser une etape precedente qui produit un resultat structure.
 
-`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Le cycle peut se repeter uniquement si l'etape `alignment_audit` ne publie pas un statut structure `clean: true`.
+`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Ce workflow fixe `defaults.timeout_seconds` a 3600 secondes, utilise ponctuellement `gpt-5.4-mini` pour les appels directs, et fixe `loop_policy.max_cycles` a 1: l'audit d'alignement sert donc a produire un arret propre, pas a relancer automatiquement un second cycle.
 
 ## Exemples
 
@@ -167,6 +185,7 @@ Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_arti
 cargo run -q -p app -- --model gpt-5.4 --reasoning low
 cargo run -q -p app -- --mode exec --model gpt-5.4 --reasoning low "Resume ce projet"
 cargo run -q -p app -- --mode exec --verbose --model gpt-5.4 --reasoning low "Resume ce projet"
+cargo run -q -p app -- --mode exec --continue-codex "Continue la derniere session"
 cargo run -q -p app -- --mode exec --sandbox danger-full-access --ask-for-approval never "Resume ce projet"
 cargo run -q -p app -- audit
 cargo run -q -p app -- audit --target ..\mon-projet
@@ -181,4 +200,6 @@ cargo run -q -p app -- review --type audit --artifact .audit\audit-1781887189.md
 cargo run -q -p app -- review implementation crates\app --timeout-seconds 120
 cargo run -q -p app -- fix-loop plan .plan\plan-1781894465.md --timeout-seconds 1800
 cargo run -q -p app -- loop --type implementation --artifact crates\app --output-dir .fix-loop
+cargo run -q -p app -- automate --workflow .\workflow.json "Objectif initial"
+cargo run -q -p app -- refactor-auto --target crates\app
 ```

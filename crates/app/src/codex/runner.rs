@@ -108,6 +108,7 @@ pub fn run_exec_until_final_message(
 
 pub fn base_command_args(request: &CodexRequest, inside_git_repository: bool) -> Vec<String> {
     let mut args = Vec::new();
+    args.extend(request.permissions.cli_args());
 
     if request.mode == CodexMode::Exec {
         args.push("exec".to_string());
@@ -121,8 +122,6 @@ pub fn base_command_args(request: &CodexRequest, inside_git_repository: bool) ->
             args.push("--skip-git-repo-check".to_string());
         }
     }
-
-    args.extend(request.permissions.cli_args());
 
     args.push("--model".to_string());
     args.push(request.model.clone());

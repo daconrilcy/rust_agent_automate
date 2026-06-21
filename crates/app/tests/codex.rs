@@ -94,3 +94,43 @@ fn exec_mode_outside_git_adds_skip_repo_check() {
 
     let _ = fs::remove_dir_all(workspace);
 }
+
+#[test]
+fn exec_mode_places_permission_flags_before_exec_subcommand() {
+    let workspace = support::temp_dir("codex_runner_permissions");
+    let repo_dir = workspace.join("repo");
+    let bin = support::create_fake_codex_bin(&workspace);
+    let log_path = workspace.join("codex.log");
+    fs::create_dir_all(repo_dir.join(".git")).expect("creation du depot");
+
+    let mut command = support::build_command();
+    command
+        .current_dir(&repo_dir)
+        .env(
+            "PATH",
+            support::join_path_dirs([bin.parent().expect("bin parent").to_path_buf()]),
+        )
+        .env("USERPROFILE", &workspace)
+        .env("FAKE_CODEX_LOG", &log_path)
+        .env("FAKE_CODEX_MESSAGE", "final message")
+        .args([
+            "--mode",
+            "exec",
+            "--sandbox",
+            "danger-full-access",
+            "--ask-for-approval",
+            "never",
+            "Analyse",
+        ]);
+
+    let output = command.output().expect("execution codex");
+
+    assert!(output.status.success());
+    let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
+    assert!(
+        logged.contains("args=--sandbox danger-full-access --ask-for-approval never exec"),
+        "{logged}"
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+}

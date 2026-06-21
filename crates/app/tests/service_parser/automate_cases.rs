@@ -72,7 +72,32 @@ fn parses_refactor_automate_with_default_workflow() {
         normalize_path(&command.target_dir)
     );
     assert_eq!(command.initial_prompt, "Durcir le code");
+    assert!(command.agent_context.solo);
+    assert!(command.agent_context.windows_only);
     assert_eq!(command.workflow.steps[0].name, "audit");
+}
+
+#[test]
+fn parses_refactor_automate_agent_context_extensions() {
+    let command = parse(&[
+        "refactor-automate",
+        "--target",
+        ".",
+        "--team",
+        "--portable",
+        "--docker",
+        "Durcir",
+    ])
+    .expect("refactor-automate parse avec contexte");
+
+    let CliCommand::RefactorAutomate(command) = command else {
+        panic!("la commande attendue est refactor-automate");
+    };
+
+    assert!(!command.agent_context.solo);
+    assert!(!command.agent_context.windows_only);
+    assert!(command.agent_context.portability);
+    assert!(command.agent_context.docker);
 }
 
 #[test]

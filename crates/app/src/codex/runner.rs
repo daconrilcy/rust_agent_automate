@@ -133,8 +133,8 @@ pub(crate) fn base_command_args(
         request.reasoning_effort
     ));
 
-    if let Some(prompt) = &request.prompt {
-        args.push(prompt.clone());
+    if let Some(prompt) = request.prompt_with_agent_context() {
+        args.push(prompt);
     }
 
     args

@@ -22,8 +22,8 @@ pub use artifact_subject::ReviewSubject;
 pub use automate::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
 pub use cli::{CliCommand, ParseOutcome, parse_args, parse_timeout, print_help};
 pub use codex::{
-    CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort, RunResult,
-    process_exit_code,
+    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
+    ReasoningEffort, RunResult, process_exit_code,
 };
 pub use command_registry::registered_commands;
 pub use reporting::{

@@ -31,6 +31,7 @@ pub fn resolve_step_args(
         if !step.fresh_codex_call {
             args.push("--continue-codex".to_string());
         }
+        args.extend(context.agent_context.cli_args());
         args.extend([
             "--model".to_string(),
             model.to_string(),
@@ -43,6 +44,7 @@ pub fn resolve_step_args(
         if !step.fresh_codex_call {
             args.insert(0, "--continue-codex".to_string());
         }
+        args.splice(0..0, context.agent_context.cli_args());
         args.splice(
             0..0,
             [
@@ -144,6 +146,31 @@ mod tests {
                 "42",
             ]
         );
+    }
+
+    #[test]
+    fn injects_agent_context_extensions_for_service_commands() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]
+            }"#,
+        )
+        .expect("workflow valide");
+        let mut agent_context = crate::codex::AgentContext::default();
+        agent_context.enable_team();
+        agent_context.enable_portability();
+        agent_context.enable_docker();
+        let context = RunContext {
+            target_dir: PathBuf::from("C:\\repo"),
+            agent_context,
+            ..RunContext::default()
+        };
+
+        let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
+
+        assert!(args.contains(&"--team".to_string()));
+        assert!(args.contains(&"--portable".to_string()));
+        assert!(args.contains(&"--docker".to_string()));
     }
 
     #[test]

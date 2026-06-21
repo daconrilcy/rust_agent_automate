@@ -4,6 +4,8 @@ use app::process_exit_code;
 use app::{ParseOutcome, parse_args, print_help};
 
 fn main() {
+    let _ = dotenvy::dotenv();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match parse_args(&args) {

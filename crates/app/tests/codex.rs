@@ -49,6 +49,8 @@ fn exec_mode_uses_requested_working_directory_and_resume_flags() {
     assert!(logged.contains("args=exec resume --last"));
     assert!(logged.contains("--model gpt-5.5"));
     assert!(logged.contains("model_reasoning_effort=\"high\""));
+    assert!(logged.contains("developpement solo avec agents"));
+    assert!(logged.contains("application locale Windows-only"));
     assert!(!logged.contains("--skip-git-repo-check"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -87,6 +89,8 @@ fn exec_mode_outside_git_adds_skip_repo_check() {
     assert!(output.status.success());
     let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
     assert!(logged.contains("--skip-git-repo-check"));
+    assert!(logged.contains("developpement solo avec agents"));
+    assert!(logged.contains("application locale Windows-only"));
 
     let _ = fs::remove_dir_all(workspace);
 }

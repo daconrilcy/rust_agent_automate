@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen_with_message, next_value, scan_args};
+use crate::codex::AgentContext;
 use crate::command_registry;
 use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
@@ -218,6 +219,7 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
     let mut workflow_path: Option<PathBuf> = None;
     let mut prompt_parts: Vec<String> = Vec::new();
     let mut named_workflow = false;
+    let mut agent_context = AgentContext::default();
 
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => Err(ParseOutcome::Help),
@@ -235,6 +237,7 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
             workflow_path = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))
         }
+        value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
             Err(ParseOutcome::Error(format!("option inconnue: {value}")))
         }
@@ -273,6 +276,7 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
         workflow_path,
         workflow,
         initial_prompt,
+        agent_context,
     })
 }
 
@@ -290,6 +294,7 @@ fn parse_refactor_automate_args_internal(
     let mut prompt_parts: Vec<String> = Vec::new();
     let mut seen_workflow = false;
     let mut seen_target = false;
+    let mut agent_context = AgentContext::default();
 
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => Err(ParseOutcome::Help),
@@ -311,6 +316,7 @@ fn parse_refactor_automate_args_internal(
             target_dir = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))
         }
+        value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
             Err(ParseOutcome::Error(format!("option inconnue: {value}")))
         }
@@ -352,5 +358,6 @@ fn parse_refactor_automate_args_internal(
         initial_prompt,
         target_dir,
         output_root,
+        agent_context,
     })
 }

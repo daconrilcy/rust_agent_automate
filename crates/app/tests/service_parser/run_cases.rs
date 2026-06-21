@@ -32,6 +32,10 @@ fn parses_defaults() {
     assert_eq!(request.mode, CodexMode::Interactive);
     assert_eq!(request.prompt, None);
     assert!(!request.verbose);
+    assert!(request.agent_context.solo);
+    assert!(request.agent_context.windows_only);
+    assert!(!request.agent_context.portability);
+    assert!(!request.agent_context.docker);
 }
 
 #[test]
@@ -58,6 +62,28 @@ fn parses_all_options() {
     assert_eq!(request.mode, CodexMode::Exec);
     assert_eq!(request.prompt.as_deref(), Some("Analyse ce repo"));
     assert!(!request.verbose);
+}
+
+#[test]
+fn parses_agent_context_extensions() {
+    let command = parse(&[
+        "--team",
+        "--portable",
+        "--docker",
+        "--mode",
+        "exec",
+        "Analyse",
+    ])
+    .expect("contexte agentique parse");
+
+    let CliCommand::Run(request) = command else {
+        panic!("la commande attendue est run");
+    };
+
+    assert!(!request.agent_context.solo);
+    assert!(!request.agent_context.windows_only);
+    assert!(request.agent_context.portability);
+    assert!(request.agent_context.docker);
 }
 
 #[test]
@@ -107,6 +133,47 @@ fn codex_commands_accept_model_and_reasoning_overrides() {
 
         assert_eq!(request.model, "gpt-5.6");
         assert_eq!(request.reasoning_effort, ReasoningEffort::Medium);
+    }
+}
+
+#[test]
+fn service_commands_accept_agent_context_extensions() {
+    let cases: &[&[&str]] = &[
+        &["audit", "--team", "--portable", "--docker"],
+        &["plan", "Cargo.toml", "--team", "--portable", "--docker"],
+        &[
+            "implementation-audit",
+            "Cargo.toml",
+            "--team",
+            "--portable",
+            "--docker",
+        ],
+        &[
+            "review",
+            "implementation",
+            "Cargo.toml",
+            "--team",
+            "--portable",
+            "--docker",
+        ],
+        &[
+            "fix-loop",
+            "implementation",
+            "Cargo.toml",
+            "--team",
+            "--portable",
+            "--docker",
+        ],
+    ];
+
+    for case in cases {
+        let command = parse(case).expect("la commande doit accepter le contexte agentique");
+        let context = &request_for(&command).agent_context;
+
+        assert!(!context.solo);
+        assert!(!context.windows_only);
+        assert!(context.portability);
+        assert!(context.docker);
     }
 }
 

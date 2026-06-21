@@ -7,6 +7,8 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 - le niveau de raisonnement via `--reasoning` (`low` par defaut, valeurs possibles: `low`, `medium`, `high`)
 - le mode via `--mode` (`interactive` ou `exec`)
 - la verbosite via `--verbose` pour voir la sortie brute de `codex exec`
+- le contexte agentique par defaut: developpement solo, local, Windows-only, sans objectif de portabilite implicite
+- des extensions de contexte via `--team`, `--portable`/`--portability`, et `--docker` quand une commande doit raisonner pour une equipe, une cible portable ou une execution conteneurisee
 - un audit Rust via le skill Codex central `rust-refactor-audit`, avec `--target` pour choisir le dossier a auditer et sauvegarde du rapport dans `.audit`
 - un plan d'integration depuis un audit via le skill Codex central `refactor-plan-from-audit`, avec sauvegarde du plan dans `.plan`
 - un audit d'implementation depuis un plan via le skill Codex central `rust-implementation-plan-audit`, avec sauvegarde du rapport dans `.audit`
@@ -20,10 +22,12 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 ```powershell
 cargo run -p app
 cargo check
-$env:CARGO_TARGET_DIR='.target-verify'; cargo test
+cargo test --target-dir .target-verify
 cargo run -q -p app -- audit
 cargo run -q -p app -- audit --target ..\mon-projet
 cargo run -q -p app -- audit --timeout-seconds 120
+cargo run -q -p app -- audit --team --portable
+cargo run -q -p app -- refactor-automate --target crates\app --docker "Durcir le workflow local"
 cargo run -q -p app -- plan .audit\audit-1781887189.md
 cargo run -q -p app -- implementation-audit .plan\plan-1781894465.md
 cargo run -q -p app -- implementation-audit --plan .plan\plan-1781894465.md --implementation crates\app
@@ -40,12 +44,14 @@ cargo run -q -p app -- refactor-automate --target crates\app "Refactoring SOLID/
 
 ## Verification locale
 
-Sur cette machine, `cargo test` peut echouer en cible par defaut si `target\debug\app.exe` reste verrouille. La voie de verification recommandee pour cette passe de refactoring est:
+L'application charge automatiquement un fichier `.env` depuis le repertoire de lancement. Copie `.env.example` vers `.env` pour configurer les chemins locaux utiles a l'application, par exemple `CODEX_CLI_PATH`.
+
+Sur cette machine, `cargo test` peut echouer en cible par defaut si `target\debug\app.exe` reste verrouille. Cargo ne lit pas `.env` directement; utilise donc `--target-dir` pour isoler la sortie de verification sans passer par `$env:`.
 
 ```powershell
-$env:CARGO_TARGET_DIR='.target-verify'; cargo test --test service_parser
-$env:CARGO_TARGET_DIR='.target-verify'; cargo test --test workflow_chain
-$env:CARGO_TARGET_DIR='.target-verify'; cargo test
+cargo test --target-dir .target-verify --test service_parser
+cargo test --target-dir .target-verify --test workflow_chain
+cargo test --target-dir .target-verify
 ```
 
 ## Note d'architecture

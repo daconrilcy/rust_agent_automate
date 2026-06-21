@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use app::CliCommand;
 use app::{
-    CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort, ServiceCommandKind,
-    ServiceCommandOptions,
+    AgentContext, CodexMode, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+    ServiceCommandKind, ServiceCommandOptions,
 };
 use support::{command_kind, normalize_path, parse, request_for};
 
@@ -21,6 +21,7 @@ fn service_command_specs_cover_aliases_and_exec_request_shape() {
         resume_last: true,
         output_dir: None,
         timeout: Duration::from_secs(12),
+        agent_context: AgentContext::default(),
     };
 
     let request = options.build_request("Prompt".to_string());

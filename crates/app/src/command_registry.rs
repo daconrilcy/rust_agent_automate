@@ -20,7 +20,7 @@ pub struct RegisteredCommand<'a> {
 }
 
 pub const DIRECT_RUN_USAGE: &[&str] = &[
-    r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [prompt]"#,
+    r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [--team] [--portable] [--docker] [prompt]"#,
 ];
 
 pub const DIRECT_RUN_EXAMPLES: &[&str] = &[
@@ -35,7 +35,9 @@ const STATIC_COMMANDS: &[StaticCommandSpec] = &[
             name: "automate",
             aliases: &[],
             accepts_codex_options: false,
-            usage: &["cargo run -p app -- automate <workflow.json> [prompt]"],
+            usage: &[
+                "cargo run -p app -- automate <workflow.json> [--team] [--portable] [--docker] [prompt]",
+            ],
             examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
         },
         parser: |args, _context| {
@@ -48,7 +50,7 @@ const STATIC_COMMANDS: &[StaticCommandSpec] = &[
             aliases: &["refactor-auto"],
             accepts_codex_options: false,
             usage: &[
-                "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [prompt]",
+                "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [--team] [--portable] [--docker] [prompt]",
             ],
             examples: &[
                 "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",

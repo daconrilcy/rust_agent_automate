@@ -8,12 +8,14 @@ use super::step_outcome::{
     validate_and_normalize_outcome,
 };
 use super::workflow_model::{Workflow, WorkflowStep};
+use crate::codex::AgentContext;
 
 #[derive(Debug, Default)]
 pub struct RunContext {
     pub workspace_root: PathBuf,
     pub initial_prompt: String,
     pub target_dir: PathBuf,
+    pub agent_context: AgentContext,
     pub current_cycle: u32,
     pub last_output: String,
     pub last_artifact: Option<PathBuf>,
@@ -26,12 +28,14 @@ pub fn run_workflow(
     initial_prompt: &str,
     workspace_root: &Path,
     target_dir: &Path,
+    agent_context: &AgentContext,
 ) -> io::Result<AutomateReport> {
     run_workflow_with_executor(
         workflow,
         initial_prompt,
         workspace_root,
         target_dir,
+        agent_context,
         run_step,
     )
     .map_err(io::Error::other)
@@ -42,6 +46,7 @@ pub fn run_workflow_with_executor<F>(
     initial_prompt: &str,
     workspace_root: &Path,
     target_dir: &Path,
+    agent_context: &AgentContext,
     mut run_step: F,
 ) -> Result<AutomateReport, super::AutomationError>
 where
@@ -55,6 +60,7 @@ where
         workspace_root: workspace_root.to_path_buf(),
         initial_prompt: initial_prompt.to_string(),
         target_dir: target_dir.to_path_buf(),
+        agent_context: agent_context.clone(),
         current_cycle: 1,
         ..RunContext::default()
     };

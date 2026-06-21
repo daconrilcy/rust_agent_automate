@@ -96,6 +96,7 @@ fn parse_common_option(
             options.resume_last = true;
             Ok(Some(1))
         }
+        value if options.agent_context.apply_cli_flag(value) => Ok(Some(1)),
         _ => Ok(None),
     }
 }

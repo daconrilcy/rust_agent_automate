@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use crate::automate::{AutomateCommand, RefactorAutomateCommand};
-use crate::codex::{CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT};
+use crate::codex::{
+    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
+};
 use crate::command_registry;
 use crate::service_command::ServiceCommandDispatch;
 
@@ -160,6 +162,7 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let mut mode = CodexMode::Interactive;
     let mut verbose = false;
     let mut resume_last = false;
+    let mut agent_context = AgentContext::default();
     let mut seen_model = false;
     let mut seen_reasoning = false;
     let mut seen_mode = false;
@@ -193,6 +196,7 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
             resume_last = true;
             Ok(ParseLoopControl::Continue(1))
         }
+        value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
             Err(ParseOutcome::Error(format!("option inconnue: {value}")))
         }
@@ -218,7 +222,8 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
 
     Ok(
         CodexRequest::new(model, reasoning_effort, mode, prompt, verbose)
-            .with_resume_last(resume_last),
+            .with_resume_last(resume_last)
+            .with_agent_context(agent_context),
     )
 }
 
@@ -272,6 +277,7 @@ fn run_automate(command: &AutomateCommand) -> i32 {
         &command.initial_prompt,
         &command.workspace_root,
         &command.workspace_root,
+        &command.agent_context,
     )
 }
 
@@ -286,6 +292,7 @@ fn run_refactor_automate(command: &RefactorAutomateCommand) -> i32 {
         &command.initial_prompt,
         &command.output_root,
         &command.target_dir,
+        &command.agent_context,
     )
 }
 
@@ -294,8 +301,15 @@ fn run_automate_workflow(
     initial_prompt: &str,
     workspace_root: &std::path::Path,
     target_dir: &std::path::Path,
+    agent_context: &AgentContext,
 ) -> i32 {
-    match crate::automate::run_workflow(workflow, initial_prompt, workspace_root, target_dir) {
+    match crate::automate::run_workflow(
+        workflow,
+        initial_prompt,
+        workspace_root,
+        target_dir,
+        agent_context,
+    ) {
         Ok(report) => {
             println!(
                 "Automate termine apres {} cycle(s){}.",

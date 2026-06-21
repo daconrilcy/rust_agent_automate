@@ -2,6 +2,7 @@
 .env
 **/*.rs.bk
 .audit/
+.agents/
 .fix-loop/
 .plan/
 .cargo-target-verify*/

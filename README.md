@@ -22,7 +22,7 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 ```powershell
 cargo run -p app
 cargo check
-cargo test --target-dir .target-verify
+.\verify.ps1
 cargo run -q -p app -- audit
 cargo run -q -p app -- audit --target ..\mon-projet
 cargo run -q -p app -- audit --timeout-seconds 120
@@ -46,12 +46,20 @@ cargo run -q -p app -- refactor-automate --target crates\app "Refactoring SOLID/
 
 L'application charge automatiquement un fichier `.env` depuis le repertoire de lancement. Copie `.env.example` vers `.env` pour configurer les chemins locaux utiles a l'application, par exemple `CODEX_CLI_PATH`.
 
-Sur cette machine, `cargo test` peut echouer en cible par defaut si `target\debug\app.exe` reste verrouille. Cargo ne lit pas `.env` directement; utilise donc `--target-dir` pour isoler la sortie de verification sans passer par `$env:`.
+Sur cette machine, `cargo test` peut echouer en cible par defaut si `target\debug\app.exe` reste verrouille. La procedure fiable est donc versionnee dans [verify.ps1](verify.ps1): le script fixe `CARGO_TARGET_DIR` vers `.target-verify`, puis lance la sequence Windows complete.
 
 ```powershell
-cargo test --target-dir .target-verify --test service_parser
-cargo test --target-dir .target-verify --test workflow_chain
-cargo test --target-dir .target-verify
+.\verify.ps1
+```
+
+Sequence executee par le script:
+
+```powershell
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --test service_parser
+cargo test --test workflow_chain
+cargo test
 ```
 
 ## Note d'architecture

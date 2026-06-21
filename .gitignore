@@ -10,3 +10,5 @@
 target-audit-verify/
 .target-verify-loop/
 .target*/
+target-verify*/
+target*/

@@ -14,10 +14,13 @@ fn plan_prompt_mentions_skill_and_paths() {
     let prompt = plan.service.request.prompt.as_deref().expect("prompt plan");
 
     assert!(prompt.contains("$refactor-plan-from-audit"));
+    assert!(prompt.contains("$rust-railguard-doc"));
+    assert!(prompt.contains("railguard document"));
     assert!(prompt.contains("central Codex skill named refactor-plan-from-audit"));
     assert!(prompt.contains("references/plan-template.md"));
     assert!(prompt.contains("Cargo.toml"));
     assert!(prompt.contains("final plan will be saved by the wrapper"));
+    assert!(prompt.contains("railguard document path"));
     assert!(prompt.contains("complete Markdown implementation handoff plan only"));
 }
 
@@ -69,6 +72,7 @@ fn plan_command_runs_end_to_end_and_saves_the_expected_artifact() {
 
     let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
     assert!(logged.contains("$refactor-plan-from-audit"));
+    assert!(logged.contains("$rust-railguard-doc"));
     assert!(logged.contains("references/plan-template.md"));
 
     let _ = fs::remove_dir_all(workspace);

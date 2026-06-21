@@ -62,7 +62,7 @@ pub fn resolve_audit_file(
 pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path) -> String {
     render_structured_prompt(
         &format!(
-            "Use $refactor-plan-from-audit to convert the audit at \"{}\" into an implementation-ready integration plan.\nThe plan must use the central Codex skill named refactor-plan-from-audit, follow its SKILL.md instructions, and use references/plan-template.md as the output structure.",
+            "Use $refactor-plan-from-audit to convert the audit at \"{}\" into an implementation-ready integration plan.\nBefore writing the plan, use $rust-railguard-doc to verify that the target Rust workspace has a railguard document; if none exists, create it according to the rust-railguard-doc skill, then read it and use it as a planning constraint.\nThe plan must use the central Codex skill named refactor-plan-from-audit, follow its SKILL.md instructions, and use references/plan-template.md as the output structure.",
             audit_path.display()
         ),
         workspace_root,
@@ -71,7 +71,7 @@ pub fn build_prompt(workspace_root: &Path, audit_path: &Path, output_dir: &Path)
         &[PromptSection {
             heading: Cow::Borrowed(""),
             body: Cow::Borrowed(
-                "Read the audit completely from the provided path. Inspect the local workspace only enough to make the plan concrete.\nDo not modify source code. Produce the final answer as a complete Markdown implementation handoff plan only.\nInclude the source audit path, target workspace, prioritized phases, task backlog, traceability matrix, verification matrix, decision gates, out-of-scope section, rollback or fallback notes, and the first prompt for the implementation agent.",
+                "Read the audit completely from the provided path. Inspect the local workspace only enough to make the plan concrete.\nRead the railguard document before choosing phases, add any missing evidence-backed constraints discovered during planning, and include railguard-relevant instructions in the first prompt for the implementation agent.\nDo not modify source code except for the railguard document. Produce the final answer as a complete Markdown implementation handoff plan only.\nInclude the source audit path, target workspace, railguard document path, prioritized phases, task backlog, traceability matrix, verification matrix, decision gates, out-of-scope section, rollback or fallback notes, and the first prompt for the implementation agent.",
             ),
         }],
     )

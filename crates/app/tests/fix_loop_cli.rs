@@ -27,6 +27,8 @@ fn fix_loop_prompt_mentions_skill_and_input_kind() {
     assert!(prompt.contains("Cargo.toml"));
     assert!(prompt.contains("final loop report will be saved by the wrapper"));
     assert!(prompt.contains("rust-dev-solid"));
+    assert!(prompt.contains("$rust-railguard-doc"));
+    assert!(prompt.contains("railguard document path"));
     assert!(prompt.contains("adversarial-review cycles until no actionable findings remain"));
     assert!(prompt.contains("complete Markdown loop report"));
 }
@@ -72,6 +74,7 @@ fn fix_loop_command_runs_end_to_end_and_saves_the_expected_artifact() {
 
     let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
     assert!(logged.contains("$rust-review-fix-loop"));
+    assert!(logged.contains("$rust-railguard-doc"));
     assert!(logged.contains("Input kind: audit"));
 
     let _ = fs::remove_dir_all(workspace);

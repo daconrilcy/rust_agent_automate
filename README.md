@@ -12,10 +12,10 @@ Le crate `app` contient le binaire. Il peut lancer `codex` en terminal en config
 - le contexte agentique par defaut: developpement solo, local, Windows-only, sans objectif de portabilite implicite
 - des extensions de contexte via `--solo`, `--team`, `--windows-only`, `--portable`/`--portability`, et `--docker` quand une commande doit raisonner pour une equipe, une cible portable ou une execution conteneurisee
 - un audit Rust via le skill Codex central `rust-refactor-audit`, avec `--target` pour choisir le dossier a auditer et sauvegarde du rapport dans `.audit`
-- un plan d'integration depuis un audit via le skill Codex central `refactor-plan-from-audit`, avec sauvegarde du plan dans `.plan`
+- un plan d'integration depuis un audit via le skill Codex central `refactor-plan-from-audit`, qui consulte ou cree le railguard via `rust-railguard-doc`, avec sauvegarde du plan dans `.plan`
 - un audit d'implementation depuis un plan via le skill Codex central `rust-implementation-plan-audit`, avec sauvegarde du rapport dans `.audit`
 - une review adversariale via le skill Codex central `adversarial-review`, en precisant si l'entree est un `plan`, un `audit` ou une `implementation`, avec sauvegarde dans `.review`
-- une boucle review/correction via le skill Codex central `rust-review-fix-loop`, en partant d'un `audit`, d'un `plan` ou d'une `implementation`, avec sauvegarde du rapport dans `.fix-loop`
+- une boucle review/correction via le skill Codex central `rust-review-fix-loop`, en partant d'un `audit`, d'un `plan` ou d'une `implementation`, en consultant ou alimentant le railguard, avec sauvegarde du rapport dans `.fix-loop`
 - un automate JSON via `automate`, capable d'enchainer les services Rust du binaire courant et des appels Codex directs
 - un automate de refactoring via `refactor-automate`, qui cible un dossier donne ou le workspace local par defaut, avec `workflows/refactor.json` comme workflow integre
 
@@ -177,7 +177,7 @@ Champs d'etape:
 
 Placeholders disponibles: `{initial_prompt}`, `{target}`, `{cycle}`, `{last_artifact}`, `{last_output}`, `{artifact:<nom_etape>}`. Les references `{artifact:<nom_etape>}` doivent viser une etape precedente qui produit un resultat structure.
 
-`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Ce workflow fixe `defaults.timeout_seconds` a 3600 secondes, utilise ponctuellement `gpt-5.4-mini` pour les appels directs, et fixe `loop_policy.max_cycles` a 1: l'audit d'alignement sert donc a produire un arret propre, pas a relancer automatiquement un second cycle.
+`refactor-automate` embarque le workflow [workflows/refactor.json](workflows/refactor.json): audit, verification ou creation du railguard via `rust-railguard-doc`, plan, implementation, review/corrections adversariales par `fix-loop`, audit d'alignement avec le plan initial, corrections, puis commit/push. Les phases plan, implementation et corrections doivent lire et alimenter le railguard du workspace cible. Ce workflow fixe `defaults.timeout_seconds` a 3600 secondes, utilise ponctuellement `gpt-5.4-mini` pour les appels directs, et fixe `loop_policy.max_cycles` a 1: l'audit d'alignement sert donc a produire un arret propre, pas a relancer automatiquement un second cycle.
 
 ## Exemples
 

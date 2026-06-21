@@ -13,6 +13,17 @@
       "fresh_codex_call": true
     },
     {
+      "name": "railguard",
+      "rust_command": [
+        "--mode",
+        "exec",
+        "Use $rust-railguard-doc for the Rust workspace at {target}. Verify whether a railguard document exists in that workspace; if none exists, create it according to the skill instructions. Read the audit at {artifact:audit} and the initial prompt: {initial_prompt}. Update the railguard with evidence-backed constraints that future plan and dev phases must follow. Do not modify source code. Finish by reporting the railguard path and whether it was created or updated."
+      ],
+      "model": "gpt-5.4-mini",
+      "reasoning": "low",
+      "fresh_codex_call": true
+    },
+    {
       "name": "plan",
       "rust_command": ["plan", "{artifact:audit}"],
       "model": "gpt-5.4",
@@ -24,7 +35,7 @@
       "rust_command": [
         "--mode",
         "exec",
-        "Use $rust-dev-solid to implement the refactoring plan at {artifact:plan} for {target}. Initial prompt: {initial_prompt}. Apply the scoped Rust changes, preserve unrelated user changes, and run the relevant verification commands before finishing."
+        "Use $rust-dev-solid to implement the refactoring plan at {artifact:plan} for {target}. Before editing source code, read the target workspace railguard document; if it is missing or stale, use $rust-railguard-doc to create or update it first. During development, keep the railguard fed with any new evidence-backed architecture constraints, invariants, verification commands, or open questions discovered while implementing. Initial prompt: {initial_prompt}. Apply the scoped Rust changes, preserve unrelated user changes, and run the relevant verification commands before finishing."
       ],
       "model": "gpt-5.4-mini",
       "reasoning": "low",

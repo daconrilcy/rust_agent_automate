@@ -23,6 +23,7 @@ Le crate `app` contient un premier module Rust capable de lancer `codex` en term
 cargo run -p app
 cargo check
 .\verify.ps1
+.\install.ps1
 cargo run -q -p app -- audit
 cargo run -q -p app -- audit --target ..\mon-projet
 cargo run -q -p app -- audit --timeout-seconds 120
@@ -60,6 +61,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --test service_parser
 cargo test --test workflow_chain
 cargo test
+```
+
+## Installation locale
+
+Le script [install.ps1](install.ps1) compile le binaire en release, copie l'executable dans `%LOCALAPPDATA%\Programs\rust_agent`, puis ajoute ce dossier au `PATH` utilisateur.
+
+```powershell
+.\install.ps1
+rust_agent --help
+```
+
+Par defaut, Cargo produit `app.exe`; le script l'installe comme `rust_agent.exe`. Pour changer le nom de commande ou le dossier d'installation:
+
+```powershell
+.\install.ps1 -CommandName app -InstallRoot "$env:LOCALAPPDATA\Programs"
 ```
 
 ## Note d'architecture

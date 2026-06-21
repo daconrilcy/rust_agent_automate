@@ -11,7 +11,7 @@ use super::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AutomationError {
+pub enum AutomationError {
     UnsupportedServiceCommand {
         command_name: String,
     },

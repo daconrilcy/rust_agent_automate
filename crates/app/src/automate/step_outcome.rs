@@ -12,10 +12,10 @@ use super::workflow_model::{Workflow, WorkflowStep, WorkflowStepKind};
 use super::workflow_runner::RunContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StepOutcome {
-    pub(crate) status_code: Option<i32>,
-    pub(crate) artifact_path: Option<PathBuf>,
-    pub(crate) clean: Option<bool>,
+pub struct StepOutcome {
+    pub status_code: Option<i32>,
+    pub artifact_path: Option<PathBuf>,
+    pub clean: Option<bool>,
 }
 
 struct StepCommandSpec {
@@ -181,7 +181,7 @@ fn child_current_dir(context: &RunContext) -> &Path {
     &context.workspace_root
 }
 
-pub(crate) fn validate_and_normalize_outcome(
+pub fn validate_and_normalize_outcome(
     workflow: &Workflow,
     step: &WorkflowStep,
     context: &RunContext,
@@ -198,7 +198,7 @@ pub(crate) fn validate_and_normalize_outcome(
     Ok(outcome)
 }
 
-pub(crate) fn command_outcome_for_step(
+pub fn command_outcome_for_step(
     _workflow: &Workflow,
     step: &WorkflowStep,
     _context: &RunContext,

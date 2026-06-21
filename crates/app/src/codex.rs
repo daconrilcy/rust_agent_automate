@@ -1,7 +1,7 @@
-mod discovery;
-mod repo;
+pub mod discovery;
+pub mod repo;
 mod request;
-mod runner;
+pub mod runner;
 
 use std::io;
 use std::time::Duration;

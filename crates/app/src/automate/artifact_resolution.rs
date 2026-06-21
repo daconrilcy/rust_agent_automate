@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn normalize_artifact_path(
+pub fn normalize_artifact_path(
     path: &Path,
     workspace_root: &Path,
 ) -> Result<PathBuf, crate::automate::AutomationError> {
@@ -49,27 +49,4 @@ pub(crate) fn normalize_artifact_path(
     }
 
     Ok(normalized)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalizes_relative_artifact_path_from_workspace_root() {
-        let workspace = std::env::temp_dir().join("rust_agent_workflow_runner_relative_artifact");
-        let artifact = workspace.join(".audit").join("audit.md");
-        fs::create_dir_all(artifact.parent().expect("parent")).expect("creation du dossier");
-        fs::write(&artifact, "audit").expect("ecriture de l'artefact");
-
-        let normalized = normalize_artifact_path(Path::new(".audit\\audit.md"), &workspace)
-            .expect("normalisation");
-
-        assert_eq!(
-            normalized,
-            fs::canonicalize(&artifact).expect("chemin canonical")
-        );
-
-        let _ = fs::remove_dir_all(workspace);
-    }
 }

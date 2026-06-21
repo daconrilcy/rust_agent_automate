@@ -2,21 +2,21 @@
 //! The exported modules below are supported as crate-local seams, not as a long-term
 //! general-purpose public API contract.
 
-mod artifact;
+pub mod artifact;
 mod artifact_subject;
 mod audit;
-mod automate;
+pub mod automate;
 mod cli;
-mod codex;
+pub mod codex;
 mod command_registry;
 mod fix_loop;
 mod implementation_audit;
 mod plan;
-mod prompt;
+pub mod prompt;
 mod reporting;
 mod review;
-mod service_command;
-mod service_paths;
+pub mod service_command;
+pub mod service_paths;
 
 pub use artifact_subject::ReviewSubject;
 pub use automate::{WorkflowStepKind, default_refactor_workflow, parse_workflow};
@@ -30,4 +30,6 @@ pub use reporting::{
     CommandOutcome, ReportFailure, ReportSpec, command_failure_outcome,
     detect_clean_implementation_audit, finalize_report, write_command_outcome,
 };
-pub use service_command::{ServiceCommandKind, ServiceCommandOptions};
+pub use service_command::{
+    RequiredPathParseSpec, ServiceCommandDescriptor, ServiceCommandKind, ServiceCommandOptions,
+};

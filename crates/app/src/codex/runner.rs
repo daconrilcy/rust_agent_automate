@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use super::discovery;
 use super::request::{CodexMode, CodexRequest};
 #[path = "runner/capture.rs"]
-mod capture;
+pub mod capture;
 #[path = "runner/monitor.rs"]
 mod monitor;
 
@@ -106,10 +106,7 @@ pub fn run_exec_until_final_message(
     }
 }
 
-pub(crate) fn base_command_args(
-    request: &CodexRequest,
-    inside_git_repository: bool,
-) -> Vec<String> {
+pub fn base_command_args(request: &CodexRequest, inside_git_repository: bool) -> Vec<String> {
     let mut args = Vec::new();
 
     if request.mode == CodexMode::Exec {
@@ -140,103 +137,10 @@ pub(crate) fn base_command_args(
     args
 }
 
-pub(crate) fn append_exec_capture_args(
-    command: &mut Command,
-    output_file: &Path,
-    use_color_never: bool,
-) {
+pub fn append_exec_capture_args(command: &mut Command, output_file: &Path, use_color_never: bool) {
     command.arg("--output-last-message").arg(output_file);
 
     if use_color_never {
         command.arg("--color").arg("never");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn read_final_message_returns_none_for_missing_file() {
-        let missing = std::env::temp_dir().join(format!(
-            "rust_agent_missing_{}.txt",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
-
-        let result =
-            capture::read_final_message(&missing).expect("la lecture doit gerer un fichier absent");
-
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn read_final_message_trims_and_deletes_file() {
-        let path = std::env::temp_dir().join(format!(
-            "rust_agent_capture_{}.txt",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
-
-        fs::write(&path, "  reponse finale  \n").expect("ecriture du fichier temporaire");
-
-        let result = capture::read_final_message(&path).expect("lecture du fichier temporaire");
-
-        assert_eq!(result.as_deref(), Some("reponse finale"));
-        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
-    }
-
-    #[test]
-    fn read_final_message_if_ready_preserves_empty_file() {
-        let path = std::env::temp_dir().join(format!(
-            "rust_agent_capture_ready_empty_{}.txt",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
-
-        fs::write(&path, " \n\t ").expect("ecriture du fichier temporaire");
-
-        let result = capture::read_final_message_if_ready(&path)
-            .expect("lecture du fichier temporaire vide");
-
-        assert_eq!(result, None);
-        assert!(path.exists(), "le fichier vide doit rester disponible");
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn read_final_message_if_ready_trims_and_deletes_file() {
-        let path = std::env::temp_dir().join(format!(
-            "rust_agent_capture_ready_{}.txt",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
-
-        fs::write(&path, "  reponse prete  \n").expect("ecriture du fichier temporaire");
-
-        let result =
-            capture::read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
-
-        assert_eq!(result.as_deref(), Some("reponse prete"));
-        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
-    }
-
-    #[test]
-    fn timeout_diagnostics_mentions_capture_files() {
-        let message =
-            capture::timeout_diagnostics(Path::new("last.txt"), Some(Path::new("stderr.txt")));
-
-        assert!(message.contains("last.txt"));
-        assert!(message.contains("stderr.txt"));
     }
 }

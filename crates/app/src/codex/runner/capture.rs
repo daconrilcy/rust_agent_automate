@@ -1,7 +1,11 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const FINAL_MESSAGE_STABILITY_WINDOW: Duration = Duration::from_millis(50);
 
 pub struct ExecCapturePaths {
     output_file: PathBuf,
@@ -50,7 +54,32 @@ pub fn read_final_message(path: &Path) -> io::Result<Option<String>> {
 }
 
 pub fn read_final_message_if_ready(path: &Path) -> io::Result<Option<String>> {
-    read_final_message_inner(path, false)
+    let Some(content) = read_stable_file_content(path, FINAL_MESSAGE_STABILITY_WINDOW)? else {
+        return Ok(None);
+    };
+
+    final_message_from_content(path, &content, false)
+}
+
+fn read_stable_file_content(path: &Path, window: Duration) -> io::Result<Option<String>> {
+    let first = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+
+    if first.is_empty() {
+        return Ok(Some(first));
+    }
+
+    thread::sleep(window);
+
+    match fs::read_to_string(path) {
+        Ok(second) if second == first => Ok(Some(second)),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn read_final_message_inner(path: &Path, remove_if_empty: bool) -> io::Result<Option<String>> {
@@ -60,6 +89,14 @@ fn read_final_message_inner(path: &Path, remove_if_empty: bool) -> io::Result<Op
         Err(error) => return Err(error),
     };
 
+    final_message_from_content(path, &content, remove_if_empty)
+}
+
+fn final_message_from_content(
+    path: &Path,
+    content: &str,
+    remove_if_empty: bool,
+) -> io::Result<Option<String>> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         if remove_if_empty {
@@ -145,6 +182,8 @@ mod tests {
 
     use std::fs;
     use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(prefix: &str) -> std::path::PathBuf {
@@ -202,6 +241,56 @@ mod tests {
         let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
 
         assert_eq!(result.as_deref(), Some("reponse prete"));
+        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn read_final_message_if_ready_waits_for_stable_file_size() {
+        let path = temp_dir("capture_unstable").join("final.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("creation du dossier");
+        fs::write(&path, "partiel").expect("ecriture du fichier temporaire");
+
+        let writer_path = path.clone();
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            fs::write(&writer_path, "message final").expect("ecriture du message final");
+        });
+
+        let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
+        writer.join().expect("thread d'ecriture");
+
+        assert_eq!(result, None);
+        assert!(path.exists(), "le fichier instable doit rester disponible");
+
+        let result = read_final_message_if_ready(&path).expect("lecture apres stabilisation");
+
+        assert_eq!(result.as_deref(), Some("message final"));
+        assert!(!path.exists(), "le fichier temporaire doit etre supprime");
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn read_final_message_if_ready_waits_for_stable_content() {
+        let path = temp_dir("capture_same_size_update").join("final.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("creation du dossier");
+        fs::write(&path, "message-01").expect("ecriture du fichier temporaire");
+
+        let writer_path = path.clone();
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            fs::write(&writer_path, "message-02").expect("ecriture du message final");
+        });
+
+        let result = read_final_message_if_ready(&path).expect("lecture du fichier temporaire");
+        writer.join().expect("thread d'ecriture");
+
+        assert_eq!(result, None);
+        assert!(path.exists(), "le fichier modifie doit rester disponible");
+
+        let result = read_final_message_if_ready(&path).expect("lecture apres stabilisation");
+
+        assert_eq!(result.as_deref(), Some("message-02"));
         assert!(!path.exists(), "le fichier temporaire doit etre supprime");
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

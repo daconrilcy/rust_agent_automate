@@ -6,7 +6,10 @@ pub use finalize::{
     CompletedReport, ReportFailure, ReportSpec, detect_clean_implementation_audit, run_codex_report,
 };
 pub use render::{command_failure_exit_code, print_completed_report, print_report_failure};
-pub use transport::{COMMAND_OUTCOME_PATH_ENV, CommandOutcome, command_failure_outcome};
+pub use transport::{
+    COMMAND_OUTCOME_PATH_ENV, COMMAND_OUTCOME_SCHEMA_VERSION, CommandOutcome,
+    command_failure_outcome,
+};
 
 // Tests locaux: finalisation, transport et detection clean sont des invariants
 // internes du reporting et ne justifient pas de re-export de confort.
@@ -18,7 +21,7 @@ mod tests {
     };
     use crate::codex::RunResult;
     use crate::reporting::finalize::finalize_report;
-    use crate::reporting::transport::write_command_outcome;
+    use crate::reporting::transport::{COMMAND_OUTCOME_SCHEMA_VERSION, write_command_outcome};
 
     use std::fs;
     use std::io;
@@ -79,8 +82,26 @@ mod tests {
         write_command_outcome(&output_path, &outcome).expect("ecriture du resultat");
 
         let saved = fs::read(&output_path).expect("lecture du resultat");
-        let decoded: CommandOutcome = serde_json::from_slice(&saved).expect("decodage JSON");
-        assert_eq!(decoded, outcome);
+        let decoded: serde_json::Value = serde_json::from_slice(&saved).expect("decodage JSON");
+        assert_eq!(
+            decoded["schema_version"],
+            serde_json::json!(COMMAND_OUTCOME_SCHEMA_VERSION)
+        );
+        let decoded_outcome: CommandOutcome =
+            serde_json::from_value(decoded["outcome"].clone()).expect("decodage outcome");
+        assert_eq!(decoded_outcome, outcome);
+        assert!(
+            fs::read_dir(output_path.parent().expect("dossier parent"))
+                .expect("lecture du dossier")
+                .all(|entry| {
+                    !entry
+                        .expect("entree")
+                        .file_name()
+                        .to_string_lossy()
+                        .contains(".tmp.")
+                }),
+            "aucun fichier temporaire de transport ne doit rester"
+        );
         let _ = fs::remove_dir_all(output_path.parent().expect("dossier parent"));
     }
 

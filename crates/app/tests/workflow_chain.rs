@@ -122,15 +122,14 @@ fn workflow_chain_persists_and_reuses_artifacts() {
 }
 
 #[test]
-fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
-    let runner_dir = support::temp_dir("workflow_runner");
-    let workspace = support::temp_dir("workflow_target");
+fn refactor_automate_writes_artifacts_to_launch_workspace_when_target_is_subdir() {
+    let workspace = support::temp_dir("workflow_runner");
+    let target_dir = workspace.join("crates").join("app");
     let codex_bin = support::create_fake_codex_bin(&workspace);
     let log_path = workspace.join("codex.log");
-    let workflow_path = runner_dir.join("workflow.json");
-    fs::create_dir_all(&runner_dir).expect("creation du dossier runner");
-    fs::create_dir_all(&workspace).expect("creation du dossier workspace");
-    fs::create_dir(runner_dir.join(".git")).expect("creation du faux depot de lancement");
+    let workflow_path = workspace.join("workflow.json");
+    fs::create_dir_all(&target_dir).expect("creation du dossier cible");
+    fs::create_dir(workspace.join(".git")).expect("creation du faux depot de lancement");
 
     let workflow = r#"{
       "defaults": {
@@ -148,6 +147,11 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
           "name": "plan",
           "rust_command": ["plan", "{artifact:audit}"],
           "fresh_codex_call": true
+        },
+        {
+          "name": "fix_loop",
+          "rust_command": ["fix-loop", "plan", "{artifact:plan}"],
+          "fresh_codex_call": true
         }
       ]
     }"#;
@@ -155,7 +159,7 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
 
     let mut command = support::build_command();
     command
-        .current_dir(&runner_dir)
+        .current_dir(&workspace)
         .env_remove("RUST_AGENT_WORKSPACE_ROOT")
         .env_remove("RUST_AGENT_USE_WORKSPACE_ROOT")
         .env(
@@ -167,7 +171,7 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
         .args([
             "refactor-automate",
             "--target",
-            workspace.to_str().expect("workspace utf-8"),
+            target_dir.to_str().expect("target utf-8"),
             "--workflow",
             workflow_path.to_str().expect("workflow path utf-8"),
             "Initial prompt",
@@ -182,28 +186,41 @@ fn refactor_automate_uses_target_workspace_when_launched_from_other_cwd() {
     let plan_reports = fs::read_dir(workspace.join(".plan"))
         .expect("lecture du dossier .plan")
         .count();
+    let fix_loop_reports = fs::read_dir(workspace.join(".fix-loop"))
+        .expect("lecture du dossier .fix-loop")
+        .count();
 
     assert!(
         audit_reports >= 1,
-        "un rapport d'audit doit etre genere dans la cible"
+        "un rapport d'audit doit etre genere dans le workspace de lancement"
     );
-    assert!(plan_reports >= 1, "un plan doit etre genere dans la cible");
     assert!(
-        !runner_dir.join(".audit").exists(),
-        "le cwd de lancement ne doit pas recevoir les artefacts"
+        plan_reports >= 1,
+        "un plan doit etre genere dans le workspace de lancement"
+    );
+    assert!(
+        fix_loop_reports >= 1,
+        "un rapport fix-loop doit etre genere dans le workspace de lancement"
+    );
+    assert!(
+        !target_dir.join(".audit").exists(),
+        "la cible de refactoring ne doit pas recevoir les artefacts"
+    );
+    assert!(
+        !target_dir.join(".plan").exists(),
+        "la cible de refactoring ne doit pas recevoir les plans"
+    );
+    assert!(
+        !target_dir.join(".fix-loop").exists(),
+        "la cible de refactoring ne doit pas recevoir les rapports fix-loop"
     );
 
     let logged = fs::read_to_string(&log_path).expect("lecture du log codex");
     assert!(
         logged.contains(&format!("cwd={}", workspace.display())),
-        "les appels codex enfants doivent s'executer depuis le workspace cible"
-    );
-    assert!(
-        logged.contains("--skip-git-repo-check"),
-        "le workspace cible sans .git doit etre detecte hors depot meme si le dossier de lancement est un depot"
+        "les appels codex enfants doivent s'executer depuis le workspace de lancement"
     );
 
-    let _ = fs::remove_dir_all(runner_dir);
     let _ = fs::remove_dir_all(workspace);
 }
 

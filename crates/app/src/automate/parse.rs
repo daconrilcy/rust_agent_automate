@@ -334,15 +334,12 @@ fn parse_refactor_automate_args_internal(
     };
     let launch_workspace_root = service_paths::current_workspace_root()?;
     let context =
-        service_paths::ExecutionContext::from_workspace_root(launch_workspace_root.clone())
-            .with_output_root(resolve_target_dir(
-                target_dir.unwrap_or(launch_workspace_root.clone()),
-                &service_paths::ExecutionContext::from_workspace_root(
-                    launch_workspace_root.clone(),
-                ),
-            )?);
-    let target_dir = context.output_root().to_path_buf();
-    let output_root = context.output_root().to_path_buf();
+        service_paths::ExecutionContext::from_workspace_root(launch_workspace_root.clone());
+    let target_dir = resolve_target_dir(
+        target_dir.unwrap_or(launch_workspace_root.clone()),
+        &context,
+    )?;
+    let output_root = launch_workspace_root.clone();
     let initial_prompt = if prompt_parts.is_empty() {
         format!(
             "Refactorer {} pour ameliorer structure, maintenabilite, evolutivite et robustesse en respectant SOLID, YAGNI, KISS et DRY.",

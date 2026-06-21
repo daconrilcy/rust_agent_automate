@@ -69,7 +69,7 @@ fn parses_refactor_automate_with_default_workflow() {
 
     assert_eq!(
         normalize_path(&command.output_root),
-        normalize_path(&command.target_dir)
+        normalize_path(&command.launch_workspace_root)
     );
     assert_eq!(command.initial_prompt, "Durcir le code");
     assert!(command.agent_context.solo);

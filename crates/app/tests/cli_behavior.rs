@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use app::{ReviewSubject, parse_args, registered_commands};
+use app::{ApprovalPolicy, ReviewSubject, SandboxMode, parse_args, registered_commands};
 
 struct CurrentDirGuard {
     _lock: MutexGuard<'static, ()>,
@@ -114,6 +114,75 @@ fn review_aliases_and_subjects_still_parse_through_public_cli() {
     let review = command.as_review().expect("commande review attendue");
 
     assert_eq!(review.subject, ReviewSubject::Plan);
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn direct_run_parses_agent_permission_flags() {
+    let parsed = parse_args(&[
+        "--mode".to_string(),
+        "exec".to_string(),
+        "--sandbox".to_string(),
+        "danger-full-access".to_string(),
+        "--ask-for-approval".to_string(),
+        "never".to_string(),
+        "--add-dir".to_string(),
+        "C:\\dev\\astral_calculation".to_string(),
+        "Travaille".to_string(),
+    ])
+    .expect("parse direct run");
+
+    let app::CliCommand::Run(request) = parsed else {
+        panic!("commande run attendue");
+    };
+
+    assert_eq!(
+        request.permissions.sandbox,
+        Some(SandboxMode::DangerFullAccess)
+    );
+    assert_eq!(
+        request.permissions.approval_policy,
+        Some(ApprovalPolicy::Never)
+    );
+    assert_eq!(
+        request.permissions.additional_writable_dirs,
+        vec![PathBuf::from("C:\\dev\\astral_calculation")]
+    );
+}
+
+#[test]
+fn service_command_parses_agent_permission_flags() {
+    let workspace = support::temp_dir("cli_permissions_service");
+    fs::create_dir_all(&workspace).expect("creation du workspace");
+
+    let _cwd = CurrentDirGuard::change_to(&workspace);
+    let parsed = parse_args(&[
+        "audit".to_string(),
+        "--target".to_string(),
+        ".".to_string(),
+        "--sandbox".to_string(),
+        "workspace-write".to_string(),
+        "--ask-for-approval".to_string(),
+        "on-request".to_string(),
+        "--add-dir".to_string(),
+        "C:\\dev\\shared".to_string(),
+    ])
+    .expect("parse audit");
+
+    let request = support::request_for(&parsed);
+    assert_eq!(
+        request.permissions.sandbox,
+        Some(SandboxMode::WorkspaceWrite)
+    );
+    assert_eq!(
+        request.permissions.approval_policy,
+        Some(ApprovalPolicy::OnRequest)
+    );
+    assert_eq!(
+        request.permissions.additional_writable_dirs,
+        vec![PathBuf::from("C:\\dev\\shared")]
+    );
 
     let _ = fs::remove_dir_all(workspace);
 }

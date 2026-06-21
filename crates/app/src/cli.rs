@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use crate::automate::{AutomateCommand, RefactorAutomateCommand};
 use crate::codex::{
-    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
+    AgentContext, AgentPermissions, CodexMode, CodexRequest, DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT,
 };
 use crate::command_registry;
 use crate::service_command::ServiceCommandDispatch;
@@ -167,9 +168,13 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     let mut verbose = false;
     let mut resume_last = false;
     let mut agent_context = AgentContext::default();
+    let mut permissions = AgentPermissions::default();
     let mut seen_model = false;
     let mut seen_reasoning = false;
     let mut seen_mode = false;
+    let mut seen_sandbox = false;
+    let mut seen_approval = false;
+    let mut seen_bypass = false;
     let mut prompt_parts: Vec<String> = Vec::new();
 
     let prompt_start = scan_args(args, |index, value| match value {
@@ -200,6 +205,39 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
             resume_last = true;
             Ok(ParseLoopControl::Continue(1))
         }
+        "--sandbox" => {
+            mark_seen(&mut seen_sandbox, "--sandbox")?;
+            permissions.sandbox = Some(
+                next_value(args, index, "--sandbox")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--ask-for-approval" => {
+            mark_seen(&mut seen_approval, "--ask-for-approval")?;
+            permissions.approval_policy = Some(
+                next_value(args, index, "--ask-for-approval")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--add-dir" => {
+            let value = next_value(args, index, "--add-dir")?;
+            permissions
+                .additional_writable_dirs
+                .push(std::path::PathBuf::from(value));
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--dangerously-bypass-approvals-and-sandbox" => {
+            mark_seen(
+                &mut seen_bypass,
+                "--dangerously-bypass-approvals-and-sandbox",
+            )?;
+            permissions.bypass_approvals_and_sandbox = true;
+            Ok(ParseLoopControl::Continue(1))
+        }
         value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
             Err(ParseOutcome::Error(format!("option inconnue: {value}")))
@@ -227,7 +265,8 @@ fn parse_run_args(args: &[String]) -> Result<CodexRequest, ParseOutcome> {
     Ok(
         CodexRequest::new(model, reasoning_effort, mode, prompt, verbose)
             .with_resume_last(resume_last)
-            .with_agent_context(agent_context),
+            .with_agent_context(agent_context)
+            .with_permissions(permissions),
     )
 }
 
@@ -282,6 +321,7 @@ fn run_automate(command: &AutomateCommand) -> i32 {
         &command.workspace_root,
         &command.workspace_root,
         &command.agent_context,
+        &command.permissions,
     )
 }
 
@@ -297,6 +337,7 @@ fn run_refactor_automate(command: &RefactorAutomateCommand) -> i32 {
         &command.output_root,
         &command.target_dir,
         &command.agent_context,
+        &command.permissions,
     )
 }
 
@@ -306,6 +347,7 @@ fn run_automate_workflow(
     workspace_root: &std::path::Path,
     target_dir: &std::path::Path,
     agent_context: &AgentContext,
+    permissions: &AgentPermissions,
 ) -> i32 {
     match crate::automate::run_workflow(
         workflow,
@@ -313,6 +355,7 @@ fn run_automate_workflow(
         workspace_root,
         target_dir,
         agent_context,
+        permissions,
     ) {
         Ok(report) => {
             println!(

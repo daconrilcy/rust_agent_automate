@@ -101,6 +101,40 @@ fn parses_refactor_automate_agent_context_extensions() {
 }
 
 #[test]
+fn parses_refactor_automate_agent_permissions() {
+    let command = parse(&[
+        "refactor-automate",
+        "--target",
+        ".",
+        "--sandbox",
+        "danger-full-access",
+        "--ask-for-approval",
+        "never",
+        "--add-dir",
+        "C:\\dev\\astral_calculation",
+        "Durcir",
+    ])
+    .expect("refactor-automate parse avec permissions");
+
+    let CliCommand::RefactorAutomate(command) = command else {
+        panic!("la commande attendue est refactor-automate");
+    };
+
+    assert_eq!(
+        command.permissions.sandbox,
+        Some(app::SandboxMode::DangerFullAccess)
+    );
+    assert_eq!(
+        command.permissions.approval_policy,
+        Some(app::ApprovalPolicy::Never)
+    );
+    assert_eq!(
+        command.permissions.additional_writable_dirs,
+        vec![std::path::PathBuf::from("C:\\dev\\astral_calculation")]
+    );
+}
+
+#[test]
 fn parses_refactor_automate_alias() {
     let command = parse(&["refactor-auto", "--target", ".", "Durcir", "le", "code"])
         .expect("refactor-auto parse");

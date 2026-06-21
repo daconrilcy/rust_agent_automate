@@ -65,7 +65,7 @@
   ],
   "loop_policy": {
     "audit_step": "alignment_audit",
-    "max_cycles": 3,
+    "max_cycles": 1,
     "clean_markers": [
       "no actionable findings",
       "aucun finding actionnable",

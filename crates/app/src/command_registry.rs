@@ -20,7 +20,7 @@ pub struct RegisteredCommand<'a> {
 }
 
 pub const DIRECT_RUN_USAGE: &[&str] = &[
-    r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--verbose] [--team] [--portable] [--docker] [prompt]"#,
+    r#"cargo run -p app -- [--model <nom>] [--reasoning <low|medium|high>] [--mode <interactive|exec>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [prompt]"#,
 ];
 
 pub const DIRECT_RUN_EXAMPLES: &[&str] = &[
@@ -36,7 +36,7 @@ const STATIC_COMMANDS: &[StaticCommandSpec] = &[
             aliases: &[],
             accepts_codex_options: false,
             usage: &[
-                "cargo run -p app -- automate <workflow.json> [--team] [--portable] [--docker] [prompt]",
+                "cargo run -p app -- automate <workflow.json> [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--team] [--portable] [--docker] [prompt]",
             ],
             examples: &["cargo run -q -p app -- automate .\\workflow.json \"Durcir ce module\""],
         },
@@ -50,10 +50,10 @@ const STATIC_COMMANDS: &[StaticCommandSpec] = &[
             aliases: &["refactor-auto"],
             accepts_codex_options: false,
             usage: &[
-                "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [--team] [--portable] [--docker] [prompt]",
+                "cargo run -p app -- refactor-automate [--target <dossier>] [--workflow <workflow.json>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--team] [--portable] [--docker] [prompt]",
             ],
             examples: &[
-                "cargo run -q -p app -- refactor-automate --target crates\\app \"Refactoring SOLID/KISS/DRY\"",
+                "cargo run -q -p app -- refactor-automate --target crates\\app --sandbox danger-full-access --ask-for-approval never \"Refactoring SOLID/KISS/DRY\"",
             ],
         },
         parser: |args, _context| {

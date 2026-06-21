@@ -122,6 +122,8 @@ pub fn base_command_args(request: &CodexRequest, inside_git_repository: bool) ->
         }
     }
 
+    args.extend(request.permissions.cli_args());
+
     args.push("--model".to_string());
     args.push(request.model.clone());
     args.push("--config".to_string());

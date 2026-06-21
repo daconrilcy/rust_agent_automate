@@ -3,7 +3,8 @@ use std::time::Duration;
 use std::{io, path::Path};
 
 use crate::codex::{
-    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+    AgentContext, AgentPermissions, CodexMode, CodexRequest, DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT, ReasoningEffort,
 };
 use crate::service_paths::ExecutionContext;
 
@@ -54,6 +55,7 @@ pub struct ServiceCommandOptions {
     pub output_dir: Option<PathBuf>,
     pub timeout: Duration,
     pub agent_context: AgentContext,
+    pub permissions: AgentPermissions,
 }
 
 impl ServiceCommandOptions {
@@ -66,6 +68,7 @@ impl ServiceCommandOptions {
             output_dir: None,
             timeout: default_timeout,
             agent_context: AgentContext::default(),
+            permissions: AgentPermissions::default(),
         }
     }
 
@@ -79,6 +82,7 @@ impl ServiceCommandOptions {
         )
         .with_resume_last(self.resume_last)
         .with_agent_context(self.agent_context.clone())
+        .with_permissions(self.permissions.clone())
     }
 }
 
@@ -112,7 +116,7 @@ pub const AUDIT_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
     aliases: &[],
     accepts_codex_options: true,
     usage: &[
-        "cargo run -p app -- audit [--target <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- audit [--target <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
     ],
     examples: &[
         "cargo run -q -p app -- audit",
@@ -133,7 +137,7 @@ pub const PLAN_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
     aliases: &[],
     accepts_codex_options: true,
     usage: &[
-        "cargo run -p app -- plan <chemin-audit> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- plan <chemin-audit> [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
     ],
     examples: &[
         "cargo run -q -p app -- plan .audit\\audit-1781887189.md",
@@ -152,8 +156,8 @@ pub const IMPLEMENTATION_AUDIT_SERVICE_COMMAND_SPEC: ServiceCommandSpec = Servic
     aliases: &["impl-audit"],
     accepts_codex_options: true,
     usage: &[
-        "cargo run -p app -- implementation-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        "cargo run -p app -- impl-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- implementation-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- impl-audit <chemin-plan> [--implementation <chemin>] [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
     ],
     examples: &[
         "cargo run -q -p app -- implementation-audit .plan\\plan-1781894465.md",
@@ -173,7 +177,7 @@ pub const REVIEW_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec {
     aliases: &[],
     accepts_codex_options: true,
     usage: &[
-        "cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- review <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
     ],
     examples: &[
         "cargo run -q -p app -- review plan .plan\\plan-1781894465.md",
@@ -193,8 +197,8 @@ pub const FIX_LOOP_SERVICE_COMMAND_SPEC: ServiceCommandSpec = ServiceCommandSpec
     aliases: &["loop"],
     accepts_codex_options: true,
     usage: &[
-        "cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
-        "cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- fix-loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
+        "cargo run -p app -- loop <plan|audit|implementation> <chemin> [--model <nom>] [--reasoning <low|medium|high>] [--sandbox <mode>] [--ask-for-approval <policy>] [--add-dir <chemin>] [--verbose] [--team] [--portable] [--docker] [--output-dir <chemin>] [--timeout-seconds <secondes>]",
     ],
     examples: &[
         "cargo run -q -p app -- fix-loop plan .plan\\plan-1781894465.md",

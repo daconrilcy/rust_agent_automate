@@ -74,6 +74,121 @@ impl std::str::FromStr for CodexMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl SandboxMode {
+    pub fn as_cli_value(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+}
+
+impl fmt::Display for SandboxMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_cli_value())
+    }
+}
+
+impl std::str::FromStr for SandboxMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "read-only" => Ok(Self::ReadOnly),
+            "workspace-write" => Ok(Self::WorkspaceWrite),
+            "danger-full-access" => Ok(Self::DangerFullAccess),
+            _ => Err(format!(
+                "mode sandbox invalide: {value}. Valeurs attendues: read-only, workspace-write, danger-full-access"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalPolicy {
+    Untrusted,
+    OnFailure,
+    OnRequest,
+    Never,
+}
+
+impl ApprovalPolicy {
+    pub fn as_cli_value(self) -> &'static str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::OnFailure => "on-failure",
+            Self::OnRequest => "on-request",
+            Self::Never => "never",
+        }
+    }
+}
+
+impl fmt::Display for ApprovalPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_cli_value())
+    }
+}
+
+impl std::str::FromStr for ApprovalPolicy {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "untrusted" => Ok(Self::Untrusted),
+            "on-failure" => Ok(Self::OnFailure),
+            "on-request" => Ok(Self::OnRequest),
+            "never" => Ok(Self::Never),
+            _ => Err(format!(
+                "politique d'approbation invalide: {value}. Valeurs attendues: untrusted, on-failure, on-request, never"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentPermissions {
+    pub sandbox: Option<SandboxMode>,
+    pub approval_policy: Option<ApprovalPolicy>,
+    pub additional_writable_dirs: Vec<PathBuf>,
+    pub bypass_approvals_and_sandbox: bool,
+}
+
+impl AgentPermissions {
+    pub fn cli_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if self.bypass_approvals_and_sandbox {
+            args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+            return args;
+        }
+
+        if let Some(sandbox) = self.sandbox {
+            args.push("--sandbox".to_string());
+            args.push(sandbox.to_string());
+        }
+
+        if let Some(policy) = self.approval_policy {
+            args.push("--ask-for-approval".to_string());
+            args.push(policy.to_string());
+        }
+
+        for dir in &self.additional_writable_dirs {
+            args.push("--add-dir".to_string());
+            args.push(dir.display().to_string());
+        }
+
+        args
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentContext {
     pub solo: bool,
@@ -191,6 +306,7 @@ pub struct CodexRequest {
     pub resume_last: bool,
     pub working_dir: Option<PathBuf>,
     pub agent_context: AgentContext,
+    pub permissions: AgentPermissions,
 }
 
 impl CodexRequest {
@@ -210,6 +326,7 @@ impl CodexRequest {
             resume_last: false,
             working_dir: None,
             agent_context: AgentContext::default(),
+            permissions: AgentPermissions::default(),
         }
     }
 
@@ -225,6 +342,11 @@ impl CodexRequest {
 
     pub fn with_agent_context(mut self, agent_context: AgentContext) -> Self {
         self.agent_context = agent_context;
+        self
+    }
+
+    pub fn with_permissions(mut self, permissions: AgentPermissions) -> Self {
+        self.permissions = permissions;
         self
     }
 

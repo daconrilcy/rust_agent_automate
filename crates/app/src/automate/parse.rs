@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::cli::{ParseLoopControl, ParseOutcome, mark_seen_with_message, next_value, scan_args};
-use crate::codex::AgentContext;
+use crate::codex::{AgentContext, AgentPermissions};
 use crate::command_registry;
 use crate::service_paths::{self, ExecutionContext, PathRequirement};
 
@@ -220,6 +220,10 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
     let mut prompt_parts: Vec<String> = Vec::new();
     let mut named_workflow = false;
     let mut agent_context = AgentContext::default();
+    let mut permissions = AgentPermissions::default();
+    let mut seen_sandbox = false;
+    let mut seen_approval = false;
+    let mut seen_bypass = false;
 
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => Err(ParseOutcome::Help),
@@ -236,6 +240,41 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
             }
             workflow_path = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))
+        }
+        "--sandbox" => {
+            mark_seen_with_message(&mut seen_sandbox, "l'option --sandbox a deja ete fournie")?;
+            permissions.sandbox = Some(
+                next_value(args, index, "--sandbox")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--ask-for-approval" => {
+            mark_seen_with_message(
+                &mut seen_approval,
+                "l'option --ask-for-approval a deja ete fournie",
+            )?;
+            permissions.approval_policy = Some(
+                next_value(args, index, "--ask-for-approval")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--add-dir" => {
+            permissions
+                .additional_writable_dirs
+                .push(PathBuf::from(next_value(args, index, "--add-dir")?));
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--dangerously-bypass-approvals-and-sandbox" => {
+            mark_seen_with_message(
+                &mut seen_bypass,
+                "l'option --dangerously-bypass-approvals-and-sandbox a deja ete fournie",
+            )?;
+            permissions.bypass_approvals_and_sandbox = true;
+            Ok(ParseLoopControl::Continue(1))
         }
         value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
@@ -277,6 +316,7 @@ fn parse_automate_args_internal(args: &[String]) -> Result<AutomateCommand, Auto
         workflow,
         initial_prompt,
         agent_context,
+        permissions,
     })
 }
 
@@ -295,6 +335,10 @@ fn parse_refactor_automate_args_internal(
     let mut seen_workflow = false;
     let mut seen_target = false;
     let mut agent_context = AgentContext::default();
+    let mut permissions = AgentPermissions::default();
+    let mut seen_sandbox = false;
+    let mut seen_approval = false;
+    let mut seen_bypass = false;
 
     let prompt_start = scan_args(args, |index, value| match value {
         "-h" | "--help" => Err(ParseOutcome::Help),
@@ -315,6 +359,41 @@ fn parse_refactor_automate_args_internal(
             let value = next_value(args, index, "--target")?;
             target_dir = Some(PathBuf::from(value));
             Ok(ParseLoopControl::Continue(2))
+        }
+        "--sandbox" => {
+            mark_seen_with_message(&mut seen_sandbox, "l'option --sandbox a deja ete fournie")?;
+            permissions.sandbox = Some(
+                next_value(args, index, "--sandbox")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--ask-for-approval" => {
+            mark_seen_with_message(
+                &mut seen_approval,
+                "l'option --ask-for-approval a deja ete fournie",
+            )?;
+            permissions.approval_policy = Some(
+                next_value(args, index, "--ask-for-approval")?
+                    .parse()
+                    .map_err(ParseOutcome::Error)?,
+            );
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--add-dir" => {
+            permissions
+                .additional_writable_dirs
+                .push(PathBuf::from(next_value(args, index, "--add-dir")?));
+            Ok(ParseLoopControl::Continue(2))
+        }
+        "--dangerously-bypass-approvals-and-sandbox" => {
+            mark_seen_with_message(
+                &mut seen_bypass,
+                "l'option --dangerously-bypass-approvals-and-sandbox a deja ete fournie",
+            )?;
+            permissions.bypass_approvals_and_sandbox = true;
+            Ok(ParseLoopControl::Continue(1))
         }
         value if agent_context.apply_cli_flag(value) => Ok(ParseLoopControl::Continue(1)),
         value if value.starts_with("--") => {
@@ -356,5 +435,6 @@ fn parse_refactor_automate_args_internal(
         target_dir,
         output_root,
         agent_context,
+        permissions,
     })
 }

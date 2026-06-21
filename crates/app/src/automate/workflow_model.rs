@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::codex::{AgentContext, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort};
+use crate::codex::{
+    AgentContext, AgentPermissions, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+};
 
 #[derive(Debug)]
 pub enum WorkflowParseError {
@@ -117,6 +119,7 @@ pub struct AutomateCommand {
     pub workflow: Workflow,
     pub initial_prompt: String,
     pub agent_context: AgentContext,
+    pub permissions: AgentPermissions,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -127,6 +130,7 @@ pub struct RefactorAutomateCommand {
     pub target_dir: PathBuf,
     pub output_root: PathBuf,
     pub agent_context: AgentContext,
+    pub permissions: AgentPermissions,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

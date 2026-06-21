@@ -12,6 +12,9 @@ struct CommonOptionSeen {
     reasoning: bool,
     output_dir: bool,
     timeout: bool,
+    sandbox: bool,
+    approval: bool,
+    bypass: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +90,41 @@ fn parse_common_option(
                 crate::cli::parse_timeout(next_value(args, index, "--timeout-seconds")?)
                     .map_err(ServiceCommandParseError::from)?;
             Ok(Some(2))
+        }
+        "--sandbox" => {
+            mark_seen(&mut seen.sandbox, "--sandbox").map_err(ServiceCommandParseError::from)?;
+            options.permissions.sandbox = Some(
+                next_value(args, index, "--sandbox")?
+                    .parse()
+                    .map_err(ServiceCommandParseError::Message)?,
+            );
+            Ok(Some(2))
+        }
+        "--ask-for-approval" => {
+            mark_seen(&mut seen.approval, "--ask-for-approval")
+                .map_err(ServiceCommandParseError::from)?;
+            options.permissions.approval_policy = Some(
+                next_value(args, index, "--ask-for-approval")?
+                    .parse()
+                    .map_err(ServiceCommandParseError::Message)?,
+            );
+            Ok(Some(2))
+        }
+        "--add-dir" => {
+            options
+                .permissions
+                .additional_writable_dirs
+                .push(PathBuf::from(next_value(args, index, "--add-dir")?));
+            Ok(Some(2))
+        }
+        "--dangerously-bypass-approvals-and-sandbox" => {
+            mark_seen(
+                &mut seen.bypass,
+                "--dangerously-bypass-approvals-and-sandbox",
+            )
+            .map_err(ServiceCommandParseError::from)?;
+            options.permissions.bypass_approvals_and_sandbox = true;
+            Ok(Some(1))
         }
         "--verbose" => {
             options.verbose = true;
@@ -381,6 +419,12 @@ mod tests {
             "C:\\tmp\\out",
             "--timeout-seconds",
             "42",
+            "--sandbox",
+            "danger-full-access",
+            "--ask-for-approval",
+            "never",
+            "--add-dir",
+            "C:\\dev\\other",
             "--verbose",
             "--continue-codex",
         ]
@@ -400,6 +444,18 @@ mod tests {
         assert_eq!(options.reasoning_effort, ReasoningEffort::Medium);
         assert_eq!(options.output_dir, Some(PathBuf::from("C:\\tmp\\out")));
         assert_eq!(options.timeout, Duration::from_secs(42));
+        assert_eq!(
+            options.permissions.sandbox,
+            Some(crate::codex::SandboxMode::DangerFullAccess)
+        );
+        assert_eq!(
+            options.permissions.approval_policy,
+            Some(crate::codex::ApprovalPolicy::Never)
+        );
+        assert_eq!(
+            options.permissions.additional_writable_dirs,
+            vec![PathBuf::from("C:\\dev\\other")]
+        );
         assert!(options.verbose);
         assert!(options.resume_last);
     }

@@ -24,8 +24,8 @@ pub use automate::{
 };
 pub use cli::{CliCommand, ParseOutcome, parse_args, print_help};
 pub use codex::{
-    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT,
-    ReasoningEffort, process_exit_code,
+    AgentContext, AgentPermissions, ApprovalPolicy, CodexMode, CodexRequest, DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT, ReasoningEffort, SandboxMode, process_exit_code,
 };
 pub use command_registry::{RegisteredCommand, registered_commands};
 pub use fix_loop::FixLoopCommand;

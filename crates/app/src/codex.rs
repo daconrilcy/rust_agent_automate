@@ -7,7 +7,8 @@ use std::io;
 use std::time::Duration;
 
 pub use request::{
-    AgentContext, CodexMode, CodexRequest, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, ReasoningEffort,
+    AgentContext, AgentPermissions, ApprovalPolicy, CodexMode, CodexRequest, DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT, ReasoningEffort, SandboxMode,
 };
 pub use runner::RunResult;
 

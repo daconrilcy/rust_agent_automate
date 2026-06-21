@@ -32,6 +32,7 @@ pub fn resolve_step_args(
             args.push("--continue-codex".to_string());
         }
         args.extend(context.agent_context.cli_args());
+        args.extend(context.permissions.cli_args());
         args.extend([
             "--model".to_string(),
             model.to_string(),
@@ -45,6 +46,7 @@ pub fn resolve_step_args(
             args.insert(0, "--continue-codex".to_string());
         }
         args.splice(0..0, context.agent_context.cli_args());
+        args.splice(0..0, context.permissions.cli_args());
         args.splice(
             0..0,
             [
@@ -84,7 +86,9 @@ mod tests {
     use super::resolve_step_args;
     use crate::automate::workflow_model::{WorkflowStepKind, parse_workflow};
     use crate::automate::workflow_runner::RunContext;
-    use crate::codex::{AgentContext, DEFAULT_MODEL};
+    use crate::codex::{
+        AgentContext, AgentPermissions, ApprovalPolicy, DEFAULT_MODEL, SandboxMode,
+    };
 
     use std::path::PathBuf;
 
@@ -175,6 +179,42 @@ mod tests {
         assert!(args.contains(&"--team".to_string()));
         assert!(args.contains(&"--portable".to_string()));
         assert!(args.contains(&"--docker".to_string()));
+    }
+
+    #[test]
+    fn injects_agent_permissions_for_service_commands() {
+        let workflow = parse_workflow(
+            r#"{
+              "steps":[{"name":"audit","rust_command":["audit","--target","{target}"]}]
+            }"#,
+        )
+        .expect("workflow valide");
+        let permissions = AgentPermissions {
+            sandbox: Some(SandboxMode::DangerFullAccess),
+            approval_policy: Some(ApprovalPolicy::Never),
+            additional_writable_dirs: vec![PathBuf::from("C:\\dev\\astral_calculation")],
+            bypass_approvals_and_sandbox: false,
+        };
+        let context = RunContext {
+            target_dir: PathBuf::from("C:\\repo"),
+            permissions,
+            ..RunContext::default()
+        };
+
+        let args = resolve_step_args(&workflow, &workflow.steps[0], &context);
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--sandbox", "danger-full-access"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--ask-for-approval", "never"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--add-dir", "C:\\dev\\astral_calculation"])
+        );
     }
 
     #[test]
